@@ -1,13 +1,13 @@
-import { ConsistentHashRing } from 'src/consistentHashRing';
-import { TableDef } from 'src/types';
+import { TableDef } from 'src/types/types';
 import { ShardService } from './shardService';
 import { AddRecordDto } from 'src/dtos/addRecordDto';
 import axios from 'axios';
+import { ConsistentHashRing } from './consistentHashingService';
 
 export class TableService {
 	private tables: Map<string, TableDef> = new Map();
 
-	constructor(private ring: ConsistentHashRing, private shardService: ShardService) {}
+	constructor(private ring: ConsistentHashRing, private shardService: ShardService) { }
 
 	listTables() {
 		return Array.from(this.tables.entries()).map(([id, def]) => ({
@@ -26,7 +26,39 @@ export class TableService {
 		return true;
 	}
 
-	existsRecord(tableId: string, partitionKey: string, sortKey?: string): boolean {}
+	async existsRecord(tableId: string, partitionKey: string, sortKey?: string): Promise<boolean> {
+		if (!this.tables.has(tableId)) return false;
+
+		const shardAddress = this.getShardForPartitionKey(tableId, partitionKey);
+		if (!shardAddress) return false;
+
+		const url = `${shardAddress}/internal/tables/${encodeURIComponent(tableId)}/records`;
+
+		try {
+			const response = await axios.head(url, { params: { partitionKey, sortKey }, timeout: 5000 });
+			return response.status === 200;
+		} catch (error) {
+			console.error('Error fetching record from shard:', error);
+			return false;
+		}
+	}
+
+	async getRecord(tableId: string, partitionKey: string, sortKey?: string): Promise<boolean> {
+		if (!this.tables.has(tableId)) return false;
+
+		const shardAddress = this.getShardForPartitionKey(tableId, partitionKey);
+		if (!shardAddress) return false;
+
+		const url = `${shardAddress}/internal/tables/${encodeURIComponent(tableId)}/records`;
+
+		try {
+			const response = await axios.get(url, { params: { partitionKey, sortKey }, timeout: 5000 });
+			return response.status === 200;
+		} catch (error) {
+			console.error('Error fetching record from shard:', error);
+			return false;
+		}
+	}
 
 	async addRecord(tableId: string, dto: AddRecordDto): Promise<boolean> {
 		if (!this.tables.has(tableId)) return false;
@@ -47,7 +79,6 @@ export class TableService {
 
 	async deleteRecord(
 		tableId: string,
-		recordKey: string,
 		partitionKey: string,
 		sortKey?: string
 	): Promise<boolean> {
@@ -56,12 +87,15 @@ export class TableService {
 		const shardAddress = this.getShardForPartitionKey(tableId, partitionKey);
 		if (!shardAddress) return false;
 
-		const url = `${shardAddress}/internal/tables/${encodeURIComponent(
-			tableId
-		)}/records/${encodeURIComponent(recordKey)}`;
+		const url = `${shardAddress}/internal/tables/${encodeURIComponent(tableId)}/records`;
 
 		try {
-			const response = await axios.delete(url, { timeout: 5000 });
+			const response = await axios.delete(url, {
+				params: {
+					partitionKey,
+					sortKey
+				}, timeout: 5000
+			});
 			return response.status === 204;
 		} catch (error) {
 			console.error('Error deleting record from shard:', error);
