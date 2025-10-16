@@ -1,10 +1,12 @@
 import { Router } from 'express';
-import { shardController } from 'src';
+import { ShardController } from '../controllers/shardController';
 
-const router = Router();
+export const createShardRoutes = (shardController: ShardController) => {
+	const router = Router();
 
-router.get('/shards', shardController.listShards);
-router.post('/shards', shardController.addShard);
-router.delete('/shards/:shardId', shardController.removeShard);
+	router.get('/shards', shardController.listShards);
+	router.post('/shards', shardController.addShard);
+	router.delete('/shards/:shardId', shardController.removeShard);
 
-export default router;
+	return router;
+};

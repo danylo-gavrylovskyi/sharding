@@ -1,28 +1,10 @@
 import { Request, Response } from 'express';
-import { AddRecordDto } from '../dtos/addRecordDto';
-import { TableService } from '../services/tableService';
-import { ShardingKeys } from '../types/types';
+import { AddRecordDto } from 'src/dtos/addRecordDto';
+import { RecordService } from 'src/services/recordService';
+import { ShardingKeys } from 'src/types/shardingKeys';
 
-export class TableController {
-	constructor(private tableService: TableService) {}
-
-	listTables = (_: Request, res: Response) => {
-		const list = this.tableService.listTables();
-		res.status(200).json({ tables: list });
-	};
-
-	createTable(req: Request, res: Response) {
-		const { tableId, partitionKey, sortKey } = req.body;
-		if (!tableId || !partitionKey) {
-			return res.status(400).json({ error: 'tableId and partitionKey are required' });
-		}
-
-		if (!this.tableService.createTable(tableId, partitionKey, sortKey)) {
-			return res.status(409).json({ error: 'Table with this ID already exists' });
-		}
-
-		return res.status(201);
-	}
+export class RecordController {
+	constructor(private recordService: RecordService) {}
 
 	existsRecord(req: Request, res: Response) {
 		const tableId = req.params.tableId;
@@ -32,7 +14,7 @@ export class TableController {
 			return res.status(400).json({ error: 'partitionKey is required' });
 		}
 
-		if (!this.tableService.existsRecord(tableId, partitionKey, sortKey)) {
+		if (!this.recordService.existsRecord(tableId, partitionKey, sortKey)) {
 			return res.status(404).json({ error: 'Record not found' });
 		}
 
@@ -47,7 +29,7 @@ export class TableController {
 			return res.status(400).json({ error: 'partitionKey is required' });
 		}
 
-		const record = this.tableService.getRecord(tableId, partitionKey, sortKey);
+		const record = this.recordService.getRecord(tableId, partitionKey, sortKey);
 		if (!record) {
 			return res.status(404).json({ error: 'Record not found' });
 		}
@@ -63,7 +45,7 @@ export class TableController {
 			return res.status(400).json({ error: 'partitionKey and record are required' });
 		}
 
-		if (!this.tableService.addRecord(tableId, { partitionKey, sortKey, record })) {
+		if (!this.recordService.addRecord(tableId, partitionKey, record, sortKey)) {
 			return res.status(500).json({ error: 'Failed to add record' });
 		}
 
@@ -78,7 +60,7 @@ export class TableController {
 			return res.status(400).json({ error: 'partitionKey is required' });
 		}
 
-		if (!this.tableService.deleteRecord(tableId, partitionKey, sortKey)) {
+		if (!this.recordService.deleteRecord(tableId, partitionKey, sortKey)) {
 			return res.status(500).json({ error: 'Failed to delete record' });
 		}
 

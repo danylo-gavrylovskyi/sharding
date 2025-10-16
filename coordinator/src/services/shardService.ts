@@ -1,10 +1,10 @@
-import { ConsistentHashRing } from 'src/consistentHashRing';
 import { ShardInfo } from 'src/types/types';
+import { ConsistentHashRing } from './consistentHashingService';
 
 export class ShardService {
 	private shards: Map<string, ShardInfo> = new Map();
 
-	constructor(private ring: ConsistentHashRing) { }
+	constructor(private ring: ConsistentHashRing) {}
 
 	listShards() {
 		return Array.from(this.shards.entries()).map(([id, meta]) => ({

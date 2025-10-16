@@ -1,7 +1,16 @@
 import { Router } from 'express';
-import shardRoutes from './shardRoutes';
-import tableRoutes from './tableRoutes';
+import { createShardRoutes } from './shardRoutes';
+import { createTableRoutes } from './tableRoutes';
+import { ShardController } from '../controllers/shardController';
+import { TableController } from '../controllers/tableController';
 
-const api = Router().use(shardRoutes).use(tableRoutes);
+export const createRoutes = (
+	shardController: ShardController,
+	tableController: TableController
+) => {
+	const api = Router()
+		.use(createShardRoutes(shardController))
+		.use(createTableRoutes(tableController));
 
-export default Router().use('/api', api);
+	return Router().use('/api', api);
+};
