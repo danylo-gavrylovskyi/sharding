@@ -7,7 +7,7 @@ import { ConsistentHashRing } from './consistentHashingService';
 export class TableService {
 	private tables: Map<string, TableDef> = new Map();
 
-	constructor(private ring: ConsistentHashRing, private shardService: ShardService) {}
+	constructor(private ring: ConsistentHashRing, private shardService: ShardService) { }
 
 	listTables() {
 		return Array.from(this.tables.entries()).map(([id, def]) => ({
@@ -47,12 +47,12 @@ export class TableService {
 		}
 	}
 
-	async getRecord(tableId: string, partitionKey: string, sortKey?: string): Promise<boolean> {
-		if (!this.tables.has(tableId)) return false;
-		if (!this.tables.get(tableId)?.sortKey && sortKey) return false;
+	async getRecord(tableId: string, partitionKey: string, sortKey?: string) {
+		if (!this.tables.has(tableId)) return null;
+		if (!this.tables.get(tableId)?.sortKey && sortKey) return null;
 
 		const shardAddress = this.getShardForPartitionKey(tableId, partitionKey);
-		if (!shardAddress) return false;
+		if (!shardAddress) return null;
 
 		const url = `${shardAddress}/internal/tables/${encodeURIComponent(tableId)}/records`;
 
@@ -61,10 +61,10 @@ export class TableService {
 				params: { partitionKey, sortKey },
 				timeout: 5000,
 			});
-			return response.status === 200;
+			return response;
 		} catch (error) {
 			console.error('Error fetching record from shard:', error);
-			return false;
+			return null;
 		}
 	}
 

@@ -3,18 +3,27 @@ import { BloomFilterService } from './services/bloomFilter/bloomFilterService';
 import { RecordService } from './services/recordService';
 import { RecordController } from './controllers/recordController';
 import { createRoutes } from './routes';
+import { ShardRegistrationService } from './services/shardRegistrationService';
 
 const app = express();
 app.use(express.json());
 
 const PORT = Number(process.env.PORT || 8000);
+const ADDRESS = process.env.ADDRESS || `http://localhost:${PORT}`
+const COORDINATOR_URL = process.env.COORDINATOR_URL || 'http://localhost:8080/api/shards'
 
+const registrationService = new ShardRegistrationService(COORDINATOR_URL, {
+	shardId: `shard-${PORT}`,
+	address: ADDRESS
+})
 const bloomFilterService = new BloomFilterService();
 const recordService = new RecordService(bloomFilterService);
 export const recordController = new RecordController(recordService);
 
 app.use(createRoutes(recordController));
 
-app.listen(PORT, () => {
-	console.log(`Coordinator service running on port ${PORT}`);
-});
+registrationService.register().then(() => {
+	app.listen(PORT, () => {
+		console.log(`Shard service running on port ${PORT}`);
+	});
+})

@@ -4,7 +4,7 @@ import { RecordService } from 'src/services/recordService';
 import { ShardingKeys } from 'src/types/shardingKeys';
 
 export class RecordController {
-	constructor(private recordService: RecordService) {}
+	constructor(private recordService: RecordService) { }
 
 	existsRecord(req: Request, res: Response) {
 		const tableId = req.params.tableId;
@@ -18,7 +18,7 @@ export class RecordController {
 			return res.status(404).json({ error: 'Record not found' });
 		}
 
-		return res.status(200);
+		return res.sendStatus(200);
 	}
 
 	getRecord(req: Request, res: Response) {
@@ -34,7 +34,7 @@ export class RecordController {
 			return res.status(404).json({ error: 'Record not found' });
 		}
 
-		return res.status(200).json({ record });
+		return res.status(200).json(record);
 	}
 
 	addRecord(req: Request, res: Response) {
@@ -49,7 +49,7 @@ export class RecordController {
 			return res.status(500).json({ error: 'Failed to add record' });
 		}
 
-		return res.status(201);
+		return res.sendStatus(201);
 	}
 
 	deleteRecord(req: Request, res: Response) {
@@ -64,6 +64,6 @@ export class RecordController {
 			return res.status(500).json({ error: 'Failed to delete record' });
 		}
 
-		return res.status(204);
+		return res.sendStatus(204);
 	}
 }
