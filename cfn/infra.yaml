@@ -1,0 +1,228 @@
+Parameters:
+    paramVpcCidr:
+        Description: IP range for VPC
+        Type: String
+        Default: 10.0.0.0/24
+    paramPrivateSubnetCidr:
+        Description: IP range for private subnet
+        Type: String
+        Default: 10.0.0.0/28
+    paramPublicSubnetCidr:
+        Description: IP range for public subnet
+        Type: String
+        Default: 10.0.0.16/28
+
+Resources:
+    shardingVPC:
+        Type: AWS::EC2::VPC
+        Properties:
+            CidrBlock: !Ref paramVpcCidr
+            Tags:
+                - Key: Name
+                  Value: sharding-vpc
+
+    shardingPrivateSubnet:
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId: !Ref shardingVPC
+            CidrBlock: !Ref paramPrivateSubnetCidr
+            AvailabilityZone: !Select [0, !GetAZs '']
+            Tags:
+                - Key: Name
+                  Value: sharding-private-subnet
+    shardingPublicSubnet:
+        Type: AWS::EC2::Subnet
+        Properties:
+            VpcId: !Ref shardingVPC
+            CidrBlock: !Ref paramPublicSubnetCidr
+            AvailabilityZone: !Select [1, !GetAZs '']
+            MapPublicIpOnLaunch: true
+            Tags:
+                - Key: Name
+                  Value: sharding-public-subnet
+
+    shardingIGW:
+        Type: AWS::EC2::InternetGateway
+        Properties:
+            Tags:
+                - Key: Name
+                  Value: sharding-igw
+    shardingIGWAttachment:
+        Type: AWS::EC2::VPCGatewayAttachment
+        Properties:
+            VpcId: !Ref shardingVPC
+            InternetGatewayId: !Ref shardingIGW
+
+    EIP:
+        Type: AWS::EC2::EIP
+        DependsOn: shardingIGWAttachment
+        Properties:
+            Domain: vpc
+            Tags:
+                - Key: Name
+                  Value: sharding-eip
+    NATGateway:
+        Type: AWS::EC2::NATGateway
+        Properties:
+            AllocationId: !GetAtt EIP.AllocationId
+            SubnetId: !Ref shardingPublicSubnet
+            Tags:
+                - Key: Name
+                  Value: sharding-nat
+
+    shardingPrivateRT:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId: !Ref shardingVPC
+            Tags:
+                - Key: Name
+                  Value: sharding-private-rt
+    shardingPrivateRoute:
+        Type: AWS::EC2::Route
+        Properties:
+            DestinationCidrBlock: 0.0.0.0/0
+            RouteTableId: !Ref shardingPrivateRT
+            NatGatewayId: !Ref NATGateway
+
+    shardingPublicRT:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId: !Ref shardingVPC
+            Tags:
+                - Key: Name
+                  Value: sharding-public-rt
+    shardingPublicRoute:
+        Type: AWS::EC2::Route
+        DependsOn: shardingIGWAttachment
+        Properties:
+            DestinationCidrBlock: 0.0.0.0/0
+            RouteTableId: !Ref shardingPublicRT
+            GatewayId: !Ref shardingIGW
+
+    shardingPublicSubnetRTAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId: !Ref shardingPublicSubnet
+            RouteTableId: !Ref shardingPublicRT
+    shardingPrivateSubnetRTAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            SubnetId: !Ref shardingPrivateSubnet
+            RouteTableId: !Ref shardingPrivateRT
+
+    coordinatorSG:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security group for EC2
+            VpcId: !Ref shardingVPC
+            SecurityGroupIngress:
+                - IpProtocol: tcp
+                  FromPort: 8080
+                  ToPort: 8080
+                  CidrIp: 0.0.0.0/0
+            Tags:
+                - Key: Name
+                  Value: sharding-coordinator-sg
+    shardSG:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Security group for EC2
+            VpcId: !Ref shardingVPC
+            SecurityGroupIngress:
+                - IpProtocol: tcp
+                  FromPort: 8000
+                  ToPort: 9000
+                  CidrIp: 10.0.0.0/16
+            Tags:
+                - Key: Name
+                  Value: sharding-shard-sg
+
+    coordinatorEC2:
+        Type: AWS::EC2::Instance
+        Properties:
+            InstanceType: t2.micro
+            ImageId: ami-015cbce10f839bd0c
+            SubnetId: !Ref shardingPublicSubnet
+            SecurityGroupIds:
+                - !Ref coordinatorSG
+            Tags:
+                - Key: Name
+                  Value: coordinator-ec2
+
+    shardInstance1:
+        Type: AWS::EC2::Instance
+        Properties:
+            InstanceType: t2.micro
+            ImageId: ami-015cbce10f839bd0c
+            SubnetId: !Ref shardingPrivateSubnet
+            SecurityGroupIds:
+                - !Ref shardSG
+            Tags:
+                - Key: Name
+                  Value: shard-1-ec2
+            UserData:
+                Fn::Base64: !Sub |
+                    #!/bin/bash
+                    # Install Node.js and Git
+                    yum update -y
+                    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+                    yum install -y nodejs git
+
+                    # Clone your app
+                    cd /home/ec2-user
+                    git clone https://github.com/yourusername/your-repo.git app
+                    cd app/shard
+
+                    # Install deps and build
+                    npm install
+                    npm run build
+
+                    # Set environment
+                    echo "PORT=8000" >> /etc/environment
+                    echo "ADDRESS=http://localhost:8000" >> /etc/environment
+                    echo "COORDINATOR_URL=http://<COORDINATOR_PUBLIC_IP>:8080/api/shards" >> /etc/environment
+                    export PORT=8000
+                    export ADDRESS=http://localhost:8000
+                    export COORDINATOR_URL=http://<COORDINATOR_PUBLIC_IP>:8080/api/shards
+
+                    # Start shard
+                    npm run start
+
+    shardInstance2:
+        Type: AWS::EC2::Instance
+        Properties:
+            InstanceType: t2.micro
+            ImageId: ami-015cbce10f839bd0c
+            SubnetId: !Ref shardingPrivateSubnet
+            SecurityGroupIds:
+                - !Ref shardSG
+            Tags:
+                - Key: Name
+                  Value: shard-2-ec2
+            UserData:
+                Fn::Base64: !Sub |
+                    #!/bin/bash
+                    # Install Node.js and Git
+                    yum update -y
+                    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+                    yum install -y nodejs git
+
+                    # Clone your app
+                    cd /home/ec2-user
+                    git clone https://github.com/yourusername/your-repo.git app
+                    cd app/shard
+
+                    # Install deps and build
+                    npm install
+                    npm run build
+
+                    # Set environment
+                    echo "PORT=8001" >> /etc/environment
+                    echo "ADDRESS=http://localhost:8001" >> /etc/environment
+                    echo "COORDINATOR_URL=http://<COORDINATOR_PUBLIC_IP>:8080/api/shards" >> /etc/environment
+                    export PORT=8001
+                    export ADDRESS=http://localhost:8001
+                    export COORDINATOR_URL=http://<COORDINATOR_PUBLIC_IP>:8080/api/shards
+
+                    # Start shard
+                    npm run start
