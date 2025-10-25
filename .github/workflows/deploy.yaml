@@ -16,8 +16,21 @@ jobs:
               with:
                   node-version: 20
 
-            - name: Install deps
+            - name: Install coordinator deps
               run: npm ci
+              working-directory: ./coordinator
+
+            - name: Install shard deps
+              run: npm ci
+              working-directory: ./shard
+
+            - name: Build coordinator
+              run: npm run build
+              working-directory: ./coordinator
+
+            - name: Build shard
+              run: npm run build
+              working-directory: ./shard
 
             - name: Setup docker build
               uses: docker/login-action@v3
