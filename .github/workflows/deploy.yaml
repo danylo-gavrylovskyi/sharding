@@ -63,6 +63,9 @@ jobs:
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   aws-region: ${{ secrets.AWS_REGION }}
 
+            - name: List files
+              run: ls -R
+
             - name: Apply infrastructure
               uses: aws-actions/aws-cloudformation-github-deploy@v1
               with:
