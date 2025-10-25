@@ -65,6 +65,7 @@ jobs:
 
             - name: List files
               run: ls -R
+              working-directory: ./sharding
 
             - name: Apply infrastructure
               uses: aws-actions/aws-cloudformation-github-deploy@v1
