@@ -67,5 +67,5 @@ jobs:
               uses: aws-actions/aws-cloudformation-github-deploy@v1
               with:
                   name: sharding-stack
-                  template: cfn/infra.yaml
+                  template: ./cfn/infra.yaml
                   no-fail-on-empty-changeset: true
