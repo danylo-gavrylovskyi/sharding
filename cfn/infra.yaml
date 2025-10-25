@@ -137,7 +137,7 @@ Resources:
                 - Key: Name
                   Value: sharding-shard-sg
 
-    coordinatorEC2:
+    coordinatorInstance:
         Type: AWS::EC2::Instance
         Properties:
             InstanceType: t2.micro
@@ -160,33 +160,6 @@ Resources:
             Tags:
                 - Key: Name
                   Value: shard-1-ec2
-            UserData:
-                Fn::Base64: !Sub |
-                    #!/bin/bash
-                    # Install Node.js and Git
-                    yum update -y
-                    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-                    yum install -y nodejs git
-
-                    # Clone your app
-                    cd /home/ec2-user
-                    git clone https://github.com/yourusername/your-repo.git app
-                    cd app/shard
-
-                    # Install deps and build
-                    npm install
-                    npm run build
-
-                    # Set environment
-                    echo "PORT=8000" >> /etc/environment
-                    echo "ADDRESS=http://localhost:8000" >> /etc/environment
-                    echo "COORDINATOR_URL=http://<COORDINATOR_PUBLIC_IP>:8080/api/shards" >> /etc/environment
-                    export PORT=8000
-                    export ADDRESS=http://localhost:8000
-                    export COORDINATOR_URL=http://<COORDINATOR_PUBLIC_IP>:8080/api/shards
-
-                    # Start shard
-                    npm run start
 
     shardInstance2:
         Type: AWS::EC2::Instance
@@ -199,30 +172,3 @@ Resources:
             Tags:
                 - Key: Name
                   Value: shard-2-ec2
-            UserData:
-                Fn::Base64: !Sub |
-                    #!/bin/bash
-                    # Install Node.js and Git
-                    yum update -y
-                    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-                    yum install -y nodejs git
-
-                    # Clone your app
-                    cd /home/ec2-user
-                    git clone https://github.com/yourusername/your-repo.git app
-                    cd app/shard
-
-                    # Install deps and build
-                    npm install
-                    npm run build
-
-                    # Set environment
-                    echo "PORT=8001" >> /etc/environment
-                    echo "ADDRESS=http://localhost:8001" >> /etc/environment
-                    echo "COORDINATOR_URL=http://<COORDINATOR_PUBLIC_IP>:8080/api/shards" >> /etc/environment
-                    export PORT=8001
-                    export ADDRESS=http://localhost:8001
-                    export COORDINATOR_URL=http://<COORDINATOR_PUBLIC_IP>:8080/api/shards
-
-                    # Start shard
-                    npm run start
