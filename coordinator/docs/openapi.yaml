@@ -1,0 +1,227 @@
+openapi: 3.1.0
+info:
+    title: Coordinator API
+    version: 1.0.0
+    description: API for managing shards, tables, and record distribution in the sharded database system.
+
+paths:
+    /shards:
+        get:
+            summary: List all shards
+            description: Returns a list of all registered shards.
+            responses:
+                '200':
+                    description: Successfully retrieved shard list.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    shards:
+                                        type: array
+                                        items:
+                                            type: object
+                                            properties:
+                                                shardId:
+                                                    type: string
+                                                address:
+                                                    type: string
+
+        post:
+            summary: Register a new shard
+            description: Adds a new shard to the cluster.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [shardId, address]
+                            properties:
+                                shardId:
+                                    type: string
+                                address:
+                                    type: string
+            responses:
+                '201':
+                    description: Shard registered successfully.
+                '400':
+                    description: Missing required fields.
+                '409':
+                    description: Shard with this ID already exists.
+
+    /shards/{shardId}:
+        delete:
+            summary: Remove a shard
+            description: Removes a shard from the cluster by ID.
+            parameters:
+                - name: shardId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+            responses:
+                '204':
+                    description: Shard removed successfully.
+                '400':
+                    description: Missing shard ID.
+                '404':
+                    description: Shard not found.
+
+    /tables:
+        get:
+            summary: List all tables
+            description: Returns a list of all tables known to the coordinator.
+            responses:
+                '200':
+                    description: Successfully retrieved table list.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    tables:
+                                        type: array
+                                        items:
+                                            type: object
+                                            properties:
+                                                tableId:
+                                                    type: string
+                                                partitionKey:
+                                                    type: string
+                                                sortKey:
+                                                    type: string
+
+        post:
+            summary: Create a new table
+            description: Registers a new table schema in the coordinator.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [tableId, partitionKey]
+                            properties:
+                                tableId:
+                                    type: string
+                                partitionKey:
+                                    type: string
+                                sortKey:
+                                    type: string
+            responses:
+                '201':
+                    description: Table created successfully.
+                '400':
+                    description: Missing required fields.
+                '409':
+                    description: Table with this ID already exists.
+
+    /tables/{tableId}/records:
+        head:
+            summary: Check if record exists
+            description: Checks if a record with the given keys exists in any shard.
+            parameters:
+                - name: tableId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+                - name: partitionKey
+                  in: query
+                  required: true
+                  schema:
+                      type: string
+                - name: sortKey
+                  in: query
+                  schema:
+                      type: string
+            responses:
+                '200':
+                    description: Record exists.
+                '400':
+                    description: Missing parameters.
+                '404':
+                    description: Record not found.
+
+        get:
+            summary: Retrieve a record
+            description: Fetches a record from the appropriate shard.
+            parameters:
+                - name: tableId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+                - name: partitionKey
+                  in: query
+                  required: true
+                  schema:
+                      type: string
+                - name: sortKey
+                  in: query
+                  schema:
+                      type: string
+            responses:
+                '200':
+                    description: Record found.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                additionalProperties: true
+                '400':
+                    description: Missing parameters.
+                '404':
+                    description: Record not found.
+
+        post:
+            summary: Add a record
+            description: Adds a record to the correct shard according to the sharding key.
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [partitionKey, record]
+                            properties:
+                                partitionKey:
+                                    type: string
+                                sortKey:
+                                    type: string
+                                record:
+                                    type: object
+            responses:
+                '201':
+                    description: Record added successfully.
+                '400':
+                    description: Missing required fields.
+                '500':
+                    description: Failed to add record.
+
+        delete:
+            summary: Delete a record
+            description: Deletes a record from the correct shard.
+            parameters:
+                - name: tableId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+                - name: partitionKey
+                  in: query
+                  required: true
+                  schema:
+                      type: string
+                - name: sortKey
+                  in: query
+                  schema:
+                      type: string
+            responses:
+                '204':
+                    description: Record deleted successfully.
+                '400':
+                    description: Missing parameters.
+                '500':
+                    description: Failed to delete record.

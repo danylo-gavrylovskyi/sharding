@@ -1,0 +1,121 @@
+openapi: 3.1.0
+info:
+    title: Shard API
+    version: 1.0.0
+    description: API for managing records within a single shard.
+
+paths:
+    /tables/{tableId}/records:
+        head:
+            summary: Check if record exists
+            description: Returns 200 if record exists in this shard, 404 otherwise.
+            parameters:
+                - name: tableId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+                - name: partitionKey
+                  in: query
+                  required: true
+                  schema:
+                      type: string
+                - name: sortKey
+                  in: query
+                  schema:
+                      type: string
+            responses:
+                '200':
+                    description: Record exists.
+                '400':
+                    description: Missing required parameters.
+                '404':
+                    description: Record not found.
+
+        get:
+            summary: Get a record
+            description: Retrieves a record from this shard by its keys.
+            parameters:
+                - name: tableId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+                - name: partitionKey
+                  in: query
+                  required: true
+                  schema:
+                      type: string
+                - name: sortKey
+                  in: query
+                  schema:
+                      type: string
+            responses:
+                '200':
+                    description: Record retrieved successfully.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                additionalProperties: true
+                '400':
+                    description: Missing parameters.
+                '404':
+                    description: Record not found.
+
+        post:
+            summary: Add a new record
+            description: Inserts a record into this shard.
+            parameters:
+                - name: tableId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required: [partitionKey, record]
+                            properties:
+                                partitionKey:
+                                    type: string
+                                sortKey:
+                                    type: string
+                                record:
+                                    type: object
+            responses:
+                '201':
+                    description: Record added successfully.
+                '400':
+                    description: Missing required fields.
+                '500':
+                    description: Failed to add record.
+
+        delete:
+            summary: Delete a record
+            description: Deletes a record from this shard.
+            parameters:
+                - name: tableId
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+                - name: partitionKey
+                  in: query
+                  required: true
+                  schema:
+                      type: string
+                - name: sortKey
+                  in: query
+                  schema:
+                      type: string
+            responses:
+                '204':
+                    description: Record deleted successfully.
+                '400':
+                    description: Missing parameters.
+                '500':
+                    description: Failed to delete record.
