@@ -1,4 +1,7 @@
 import express from 'express';
+import swaggerUi from 'swagger-ui-express';
+import YAML from 'yamljs';
+import path from 'path';
 import { BloomFilterService } from './services/bloomFilter/bloomFilterService';
 import { RecordService } from './services/recordService';
 import { RecordController } from './controllers/recordController';
@@ -19,6 +22,9 @@ const registrationService = new ShardRegistrationService(COORDINATOR_URL, {
 const bloomFilterService = new BloomFilterService();
 const recordService = new RecordService(bloomFilterService);
 export const recordController = new RecordController(recordService);
+
+const swaggerDocument = YAML.load(path.join(__dirname, '../docs/openapi.yaml'));
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.use(createRoutes(recordController));
 

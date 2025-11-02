@@ -1,4 +1,7 @@
 import express from 'express';
+import swaggerUi from 'swagger-ui-express';
+import YAML from 'yamljs';
+import path from 'path';
 import { ShardService } from './services/shardService';
 import { ShardController } from './controllers/shardController';
 import { TableController } from './controllers/tableController';
@@ -18,6 +21,9 @@ const tableService = new TableService(consistentHashingService, shardService);
 
 export const shardController = new ShardController(shardService);
 export const tableController = new TableController(tableService);
+
+const swaggerDocument = YAML.load(path.join(__dirname, '../docs/openapi.yaml'));
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 app.use(createRoutes(shardController, tableController));
 

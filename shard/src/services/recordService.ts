@@ -3,7 +3,7 @@ import { BloomFilterService } from './bloomFilter/bloomFilterService';
 export class RecordService {
 	private tables: Map<string, Map<string, Map<string, Record<string, any>>>> = new Map();
 
-	constructor(private bloomFilterService: BloomFilterService) {}
+	constructor(private bloomFilterService: BloomFilterService) { }
 
 	existsRecord(tableId: string, partitionKey: string, sortKey?: string): boolean {
 		if (!this.tables.has(tableId)) return false;
@@ -49,6 +49,8 @@ export class RecordService {
 		const sk = sortKey || '';
 		partition?.set(sk, record);
 		this.bloomFilterService.add(tableId, `${partitionKey}::${sk}`);
+
+		console.log(partition)
 
 		return true;
 	}
