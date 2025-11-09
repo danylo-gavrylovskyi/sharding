@@ -1,13 +1,13 @@
-import { TableDef } from 'src/types/types';
 import { ShardService } from './shardService';
 import { AddRecordDto } from 'src/dtos/addRecordDto';
 import axios from 'axios';
 import { ConsistentHashRing } from './consistentHashingService';
+import { ShardingKeys } from 'src/types/shardingKeys';
 
 export class TableService {
-	private tables: Map<string, TableDef> = new Map();
+	private tables: Map<string, ShardingKeys> = new Map();
 
-	constructor(private ring: ConsistentHashRing, private shardService: ShardService) { }
+	constructor(private ring: ConsistentHashRing, private shardService: ShardService) {}
 
 	listTables() {
 		return Array.from(this.tables.entries()).map(([id, def]) => ({
@@ -30,10 +30,13 @@ export class TableService {
 		if (!this.tables.has(tableId)) return false;
 		if (!this.tables.get(tableId)?.sortKey && sortKey) return false;
 
-		const shardAddress = this.getShardForPartitionKey(tableId, partitionKey);
-		if (!shardAddress) return false;
+		const shardId = this.getShardId(tableId, partitionKey);
+		if (!shardId) return false;
 
-		const url = `${shardAddress}/internal/tables/${encodeURIComponent(tableId)}/records`;
+		const replicaSet = this.shardService.getReplicaSet(shardId);
+		if (!replicaSet?.leader) return false;
+
+		const url = `${replicaSet.leader}/internal/tables/${encodeURIComponent(tableId)}/records`;
 
 		try {
 			const response = await axios.head(url, {
@@ -51,28 +54,61 @@ export class TableService {
 		if (!this.tables.has(tableId)) return null;
 		if (!this.tables.get(tableId)?.sortKey && sortKey) return null;
 
-		const shardAddress = this.getShardForPartitionKey(tableId, partitionKey);
-		if (!shardAddress) return null;
+		const shardId = this.getShardId(tableId, partitionKey);
+		if (!shardId) return null;
 
-		const url = `${shardAddress}/internal/tables/${encodeURIComponent(tableId)}/records`;
+		const replicaSet = this.shardService.getReplicaSet(shardId);
+		if (!replicaSet || !replicaSet.readQuorum) return null;
 
-		try {
-			const response = await axios.get(url, {
-				params: { partitionKey, sortKey },
-				timeout: 5000,
-			});
-			return response;
-		} catch (error) {
-			console.error('Error fetching record from shard:', error);
+		const replicas = this.shardService.getQuorumReplicas(shardId, replicaSet.readQuorum);
+		if (replicas.length === 0) return null;
+
+		const responses = await Promise.allSettled(
+			replicas.map(async (address) => {
+				const url = `${address}/internal/tables/${encodeURIComponent(tableId)}/records`;
+				try {
+					const response = await axios.get(url, {
+						params: { partitionKey, sortKey },
+						timeout: 5000,
+					});
+					return {
+						data: response.data,
+						version: response.data._version || 0,
+						success: true,
+					};
+				} catch (error) {
+					console.error(`Error fetching record from shard at ${address}:`, error);
+					return { success: false };
+				}
+			})
+		);
+
+		const successfulResponses = responses
+			.filter(
+				(r): r is PromiseFulfilledResult<{ data: any; version: number; success: boolean }> =>
+					r.status === 'fulfilled' && r.value.success
+			)
+			.map((r) => r.value);
+
+		if (successfulResponses.length < replicaSet.readQuorum) {
+			console.error(
+				`Failed to achieve read quorum. Got ${successfulResponses.length} responses, needed ${replicaSet.readQuorum}`
+			);
 			return null;
 		}
+
+		const newestVersion = successfulResponses.reduce((newest, current) => {
+			return current.version > newest.version ? current : newest;
+		}, successfulResponses[0]);
+
+		return { data: newestVersion.data };
 	}
 
 	async addRecord(tableId: string, dto: AddRecordDto): Promise<boolean> {
 		if (!this.tables.has(tableId)) return false;
 		if (!this.tables.get(tableId)?.sortKey && dto.sortKey) return false;
 
-		const shardAddress = this.getShardForPartitionKey(tableId, dto.partitionKey);
+		const shardAddress = this.getShardForWrite(tableId, dto.partitionKey);
 		if (!shardAddress) return false;
 
 		const url = `${shardAddress}/internal/tables/${encodeURIComponent(tableId)}/records`;
@@ -90,7 +126,7 @@ export class TableService {
 		if (!this.tables.has(tableId)) return false;
 		if (!this.tables.get(tableId)?.sortKey && sortKey) return false;
 
-		const shardAddress = this.getShardForPartitionKey(tableId, partitionKey);
+		const shardAddress = this.getShardForWrite(tableId, partitionKey);
 		if (!shardAddress) return false;
 
 		const url = `${shardAddress}/internal/tables/${encodeURIComponent(tableId)}/records`;
@@ -110,15 +146,16 @@ export class TableService {
 		}
 	}
 
-	private getShardForPartitionKey(tableId: string, partitionKey: string): string | null {
-		if (!this.tables.has(tableId)) return null;
-
-		const keyHash = `${tableId}::${partitionKey}`;
-
-		const shardId = this.ring.getServer(keyHash);
+	private getShardForWrite(tableId: string, partitionKey: string): string | null {
+		const shardId = this.getShardId(tableId, partitionKey);
 		if (!shardId) return null;
 
-		const shardAddress = this.shardService.getShardAddress(shardId);
-		return shardAddress;
+		const shardAddress = this.shardService.getReplicaSet(shardId);
+		return shardAddress?.leader || null;
+	}
+
+	private getShardId(tableId: string, partitionKey: string): string | null {
+		const keyHash = `${tableId}::${partitionKey}`;
+		return this.ring.getServer(keyHash);
 	}
 }

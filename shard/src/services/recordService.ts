@@ -1,9 +1,16 @@
+import { ShardRole } from '../types/shardRole.enum';
 import { BloomFilterService } from './bloomFilter/bloomFilterService';
+import { ReplicationProducerService } from './replication/replicationProducerService';
 
 export class RecordService {
 	private tables: Map<string, Map<string, Map<string, Record<string, any>>>> = new Map();
+	private logIndex = 0;
 
-	constructor(private bloomFilterService: BloomFilterService) { }
+	constructor(
+		private bloomFilterService: BloomFilterService,
+		private role: ShardRole,
+		private replicationService?: ReplicationProducerService
+	) {}
 
 	existsRecord(tableId: string, partitionKey: string, sortKey?: string): boolean {
 		if (!this.tables.has(tableId)) return false;
@@ -28,15 +35,24 @@ export class RecordService {
 		if (!table?.has(partitionKey)) return null;
 		const partition = table.get(partitionKey);
 
-		return partition?.get(sk) || null;
+		const record = partition?.get(sk);
+		if (!record) return null;
+
+		if (!record._version) {
+			record._version = this.logIndex;
+		}
+
+		return record;
 	}
 
-	addRecord(
+	async addRecord(
 		tableId: string,
 		partitionKey: string,
 		record: Record<string, any>,
 		sortKey?: string
-	): boolean {
+	): Promise<boolean> {
+		this.logIndex++;
+		record._version = this.logIndex;
 		if (!this.tables.has(tableId)) {
 			this.tables.set(tableId, new Map());
 			this.bloomFilterService.createFilter(tableId);
@@ -50,12 +66,24 @@ export class RecordService {
 		partition?.set(sk, record);
 		this.bloomFilterService.add(tableId, `${partitionKey}::${sk}`);
 
-		console.log(partition)
+		if (this.role === ShardRole.LEADER && this.replicationService) {
+			await this.replicationService.replicateCreateRecord(
+				this.logIndex,
+				tableId,
+				partitionKey,
+				record,
+				sortKey
+			);
+		}
+
+		console.log(
+			`Record ${record} added to table ${tableId} with partitionKey ${partitionKey} and sortKey ${sk}`
+		);
 
 		return true;
 	}
 
-	deleteRecord(tableId: string, partitionKey: string, sortKey?: string): boolean {
+	async deleteRecord(tableId: string, partitionKey: string, sortKey?: string): Promise<boolean> {
 		if (!this.tables.has(tableId)) return false;
 		const table = this.tables.get(tableId);
 
@@ -69,6 +97,16 @@ export class RecordService {
 		if (!isDeleted) return false;
 
 		if (partition?.size === 0) table.delete(partitionKey);
+
+		this.logIndex++;
+		if (this.role === ShardRole.LEADER && this.replicationService) {
+			await this.replicationService.replicateDeleteRecord(
+				this.logIndex,
+				tableId,
+				partitionKey,
+				sortKey
+			);
+		}
 
 		return true;
 	}

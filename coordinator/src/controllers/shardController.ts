@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { ShardService } from 'src/services/shardService';
+import { ShardMetadata } from 'src/types/shardMetadata';
 
 export class ShardController {
-	constructor(private shardService: ShardService) { }
+	constructor(private shardService: ShardService) {}
 
 	async listShards(_: Request, res: Response) {
 		const list = this.shardService.listShards();
@@ -10,16 +11,13 @@ export class ShardController {
 	}
 
 	async addShard(req: Request, res: Response) {
-		const { shardId, address } = req.body;
-		if (!shardId || !address) {
-			return res.status(400).json({ error: 'shardId and address are required' });
+		const { shardId, address, role }: ShardMetadata = req.body;
+		if (!shardId || !address || !role) {
+			return res.status(400).json({ error: 'shardId, address, and role are required' });
 		}
-		console.log("Received shard registration:", req.body);
+		console.log('Received shard registration:', req.body);
 
-
-		if (!this.shardService.addShard(shardId, address)) {
-			return res.status(409).json({ error: 'Shard with this ID already exists' });
-		}
+		this.shardService.addShard({ shardId, address, role }, shardId);
 
 		return res.sendStatus(201);
 	}

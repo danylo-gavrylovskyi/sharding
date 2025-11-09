@@ -1,0 +1,95 @@
+version: '3.9'
+services:
+  coordinator:
+    container_name: coordinator
+    build: ./coordinator
+    ports:
+      - "8080:8080"
+    networks:
+      - shardnet
+
+  shard1:
+    build: ./shard
+    container_name: shard1
+    environment:
+      - ROLE=LEADER
+      - PORT=8000
+      - SHARD_ID=shardset-1
+      - ADDRESS=http://shard1:8000
+      - COORDINATOR_URL=http://coordinator:8080/api/shards
+      - RABBITMQ_URL=amqp://rabbitmq
+    ports:
+      - "8000:8000"
+    depends_on:
+      coordinator:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - shardnet
+
+  shard2:
+    build: ./shard
+    container_name: shard2
+    environment:
+      - ROLE=FOLLOWER
+      - PORT=8001
+      - SHARD_ID=shardset-1
+      - ADDRESS=http://shard2:8001
+      - COORDINATOR_URL=http://coordinator:8080/api/shards
+      - RABBITMQ_URL=amqp://rabbitmq
+    ports:
+      - "8001:8001"
+    depends_on:
+      coordinator:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - follower1-data:/app/data
+    networks:
+      - shardnet
+
+  shard3:
+    build: ./shard
+    container_name: shard3
+    environment:
+      - ROLE=FOLLOWER
+      - PORT=8002
+      - SHARD_ID=shardset-1
+      - ADDRESS=http://shard3:8002
+      - COORDINATOR_URL=http://coordinator:8080/api/shards
+      - RABBITMQ_URL=amqp://rabbitmq
+    ports:
+      - "8002:8002"
+    depends_on:
+      coordinator:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - follower2-data:/app/data
+    networks:
+      - shardnet
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - shardnet
+
+volumes:
+  follower1-data:
+  follower2-data:
+
+networks:
+  shardnet:
+    driver: bridge

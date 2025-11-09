@@ -1,15 +1,15 @@
 import { Request, Response } from 'express';
 import { AddRecordDto } from '../dtos/addRecordDto';
 import { TableService } from '../services/tableService';
-import { ShardingKeys } from '../types/types';
+import { ShardingKeys } from '../types/shardingKeys';
 
 export class TableController {
-	constructor(private tableService: TableService) { }
+	constructor(private tableService: TableService) {}
 
 	listTables(_: Request, res: Response) {
 		const list = this.tableService.listTables();
 		res.status(200).json({ tables: list });
-	};
+	}
 
 	createTable(req: Request, res: Response) {
 		const { tableId, partitionKey, sortKey } = req.body;
@@ -32,7 +32,7 @@ export class TableController {
 			return res.status(400).json({ error: 'partitionKey is required' });
 		}
 
-		if (!await this.tableService.existsRecord(tableId, partitionKey, sortKey)) {
+		if (!(await this.tableService.existsRecord(tableId, partitionKey, sortKey))) {
 			return res.status(404).json({ error: 'Record not found' });
 		}
 
@@ -63,7 +63,7 @@ export class TableController {
 			return res.status(400).json({ error: 'partitionKey and record are required' });
 		}
 
-		if (!await this.tableService.addRecord(tableId, { partitionKey, sortKey, record })) {
+		if (!(await this.tableService.addRecord(tableId, { partitionKey, sortKey, record }))) {
 			return res.status(500).json({ error: 'Failed to add record' });
 		}
 
@@ -78,7 +78,7 @@ export class TableController {
 			return res.status(400).json({ error: 'partitionKey is required' });
 		}
 
-		if (!await this.tableService.deleteRecord(tableId, partitionKey, sortKey)) {
+		if (!(await this.tableService.deleteRecord(tableId, partitionKey, sortKey))) {
 			return res.status(500).json({ error: 'Failed to delete record' });
 		}
 
