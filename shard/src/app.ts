@@ -1,7 +1,7 @@
 import express from 'express';
-// import swaggerUi from 'swagger-ui-express';
-// import YAML from 'yamljs';
-// import path from 'path';
+import swaggerUi from 'swagger-ui-express';
+import YAML from 'yamljs';
+import path from 'path';
 import { BloomFilterService } from './services/bloomFilter/bloomFilterService';
 import { RecordService } from './services/recordService';
 import { RecordController } from './controllers/recordController';
@@ -13,6 +13,8 @@ import { ReplicationProducerService } from './services/replication/replicationPr
 import { ReplicationConsumerService } from './services/replication/replicationConsumerService';
 import { FileOffsetStoreService } from './services/offsetStore/fileOffsetStoreService';
 import { retry } from './utils/retry';
+import { MetricsService } from './services/metricService';
+import { createMetricMiddleware } from './middlewares/metricMiddleware';
 
 const app = express();
 app.use(express.json());
@@ -25,6 +27,7 @@ const ROLE: ShardRole = (process.env.ROLE as ShardRole) || ShardRole.FOLLOWER;
 const RABBITMQ_URL: string = process.env.RABBITMQ_URL || 'amqp://localhost';
 const EXCHANGE_NAME: string = process.env.EXCHANGE_NAME || 'replication';
 
+const metricService = new MetricsService('coordinator');
 const registrationService = new ShardRegistrationService(COORDINATOR_URL, {
 	shardId: SHARD_ID,
 	address: ADDRESS,
@@ -57,10 +60,10 @@ async function bootstrap() {
 
 	const recordController = new RecordController(recordService);
 
-	// const swaggerDocument = YAML.load(path.join(__dirname, '../docs/openapi.yaml'));
-	// app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
-
-	app.use(createRoutes(recordController));
+	const swaggerDocument = YAML.load(path.join(__dirname, '../docs/openapi.yaml'));
+	app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+	app.use(createMetricMiddleware(metricService));
+	app.use(createRoutes(recordController, metricService));
 
 	app.listen(PORT, () => {
 		console.log(`Shard service running on port ${PORT}`);

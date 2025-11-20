@@ -86,6 +86,27 @@ services:
     networks:
       - shardnet
 
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - shardnet
+
+  jaeger:
+    image: jaegertracing/jaeger:2.0.0
+    container_name: jaeger
+    command:
+      - "--set=receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317"
+    ports:
+      - "4317:4317"
+      - "16686:16686"
+    networks:
+      - shardnet
+
 volumes:
   follower1-data:
   follower2-data:

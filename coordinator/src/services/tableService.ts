@@ -1,13 +1,18 @@
+import axios from 'axios';
 import { ShardService } from './shardService';
 import { AddRecordDto } from 'src/dtos/addRecordDto';
-import axios from 'axios';
 import { ConsistentHashRing } from './consistentHashingService';
 import { ShardingKeys } from 'src/types/shardingKeys';
+import { LoggingService } from './logging/loggingService.interface';
 
 export class TableService {
 	private tables: Map<string, ShardingKeys> = new Map();
 
-	constructor(private ring: ConsistentHashRing, private shardService: ShardService) {}
+	constructor(
+		private ring: ConsistentHashRing,
+		private shardService: ShardService,
+		private loggingService: LoggingService
+	) {}
 
 	listTables() {
 		return Array.from(this.tables.entries()).map(([id, def]) => ({
@@ -17,12 +22,17 @@ export class TableService {
 	}
 
 	createTable(tableId: string, partitionKey: string, sortKey?: string): boolean {
+		this.loggingService.info(
+			`Creating table ${tableId} with partitionKey: ${partitionKey}, sortKey: ${sortKey}`
+		);
+
 		if (this.tables.has(tableId)) {
 			return false;
 		}
 
 		this.tables.set(tableId, { partitionKey: partitionKey, sortKey });
 
+		this.loggingService.info(`Table ${tableId} created successfully.`);
 		return true;
 	}
 
