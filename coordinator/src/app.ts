@@ -2,8 +2,10 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 import path from 'path';
+
 import { OpenTelemetryTracingService } from './services/tracing/openTelemetryTracingService';
 new OpenTelemetryTracingService();
+
 import { ShardService } from './services/shardService';
 import { ShardController } from './controllers/shardController';
 import { TableController } from './controllers/tableController';
@@ -23,7 +25,7 @@ const REPLICAS_COUNT = Number(process.env.REPLICAS_COUNT || 3);
 const metricService = new MetricsService('coordinator');
 const loggingService = new PinoLoggingService();
 const consistentHashingService = new ConsistentHashRing(REPLICAS_COUNT);
-const shardService = new ShardService(consistentHashingService);
+const shardService = new ShardService(consistentHashingService, loggingService);
 const tableService = new TableService(consistentHashingService, shardService, loggingService);
 
 export const shardController = new ShardController(shardService);

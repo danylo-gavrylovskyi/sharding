@@ -2,6 +2,10 @@ import express from 'express';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yamljs';
 import path from 'path';
+
+import { OpenTelemetryTracingService } from './services/tracing/openTelemetryTracingService';
+new OpenTelemetryTracingService();
+
 import { BloomFilterService } from './services/bloomFilter/bloomFilterService';
 import { RecordService } from './services/recordService';
 import { RecordController } from './controllers/recordController';
@@ -15,6 +19,7 @@ import { FileOffsetStoreService } from './services/offsetStore/fileOffsetStoreSe
 import { retry } from './utils/retry';
 import { MetricsService } from './services/metricService';
 import { createMetricMiddleware } from './middlewares/metricMiddleware';
+import { PinoLoggingService } from './services/logging/pinoLoggingService';
 
 const app = express();
 app.use(express.json());
@@ -28,14 +33,15 @@ const RABBITMQ_URL: string = process.env.RABBITMQ_URL || 'amqp://localhost';
 const EXCHANGE_NAME: string = process.env.EXCHANGE_NAME || 'replication';
 
 const metricService = new MetricsService('coordinator');
+const loggingService = new PinoLoggingService();
 const registrationService = new ShardRegistrationService(COORDINATOR_URL, {
 	shardId: SHARD_ID,
 	address: ADDRESS,
 	role: ROLE,
-});
+}, loggingService);
 const bloomFilterService = new BloomFilterService();
-const offsetStoreService = new FileOffsetStoreService();
-const rabbitMQService = new RabbitMQService(RABBITMQ_URL, EXCHANGE_NAME);
+const offsetStoreService = new FileOffsetStoreService(loggingService);
+const rabbitMQService = new RabbitMQService(RABBITMQ_URL, EXCHANGE_NAME, loggingService);
 
 async function bootstrap() {
 	await registrationService.register();
@@ -46,14 +52,15 @@ async function bootstrap() {
 	let recordService: RecordService;
 
 	if (ROLE === ShardRole.LEADER) {
-		const replicationProducerService = new ReplicationProducerService(rabbitMQService);
-		recordService = new RecordService(bloomFilterService, ROLE, replicationProducerService);
+		const replicationProducerService = new ReplicationProducerService(rabbitMQService, loggingService);
+		recordService = new RecordService(bloomFilterService, ROLE, loggingService, replicationProducerService);
 	} else {
-		recordService = new RecordService(bloomFilterService, ROLE);
+		recordService = new RecordService(bloomFilterService, ROLE, loggingService);
 		const replicationConsumerService = new ReplicationConsumerService(
 			rabbitMQService,
 			recordService,
-			offsetStoreService
+			offsetStoreService,
+			loggingService
 		);
 		await replicationConsumerService.start();
 	}

@@ -1,3 +1,4 @@
+import { LoggingService } from '../logging/loggingService.interface';
 import { MessageSubscriber } from '../messageQueue/types/messageSubscriber.interface';
 import { OffsetStoreService } from '../offsetStore/offsetStoreService.interface';
 import { RecordService } from '../recordService';
@@ -10,7 +11,8 @@ export class ReplicationConsumerService {
 	constructor(
 		private subscriber: MessageSubscriber,
 		private recordService: RecordService,
-		private offsetStoreService: OffsetStoreService
+		private offsetStoreService: OffsetStoreService,
+		private loggingService: LoggingService
 	) {
 		this.lastOffset = offsetStoreService.load();
 	}
@@ -18,11 +20,11 @@ export class ReplicationConsumerService {
 	async start() {
 		await this.subscriber.subscribe(async (message: ReplicationMessage) => {
 			if (message.logIndex <= this.lastOffset) {
-				console.log(`Skipping already applied message: ${message.logIndex}`);
+				this.loggingService.warn(`Skipped replayed message logIndex=${message.logIndex}`);
 				return;
 			}
 
-			console.log('Received replication message:', message);
+			this.loggingService.info(`Applying replication: ${message.operation} table=${message.tableId} pk=${message.partitionKey} logIndex=${message.logIndex}`);
 
 			switch (message.operation) {
 				case ReplicationOperation.CREATE:
@@ -41,6 +43,10 @@ export class ReplicationConsumerService {
 					);
 					break;
 			}
+
+			this.loggingService.info(
+				`Applied replication: ${message.operation} table=${message.tableId} pk=${message.partitionKey} logIndex=${message.logIndex}`
+			);
 
 			this.lastOffset = message.logIndex;
 			this.offsetStoreService.save(this.lastOffset);

@@ -1,10 +1,11 @@
 import { retry } from '../../utils/retry';
+import { LoggingService } from '../logging/loggingService.interface';
 import { MessagePublisher } from '../messageQueue/types/messagePublisher.interface';
 import { ReplicationMessage } from './types/replicationMessage.type';
 import { ReplicationOperation } from './types/replicationOperation.enum';
 
 export class ReplicationProducerService {
-	constructor(private publisher: MessagePublisher) {}
+	constructor(private publisher: MessagePublisher, private loggingService: LoggingService) { }
 
 	async replicateCreateRecord(
 		logIndex: number,
@@ -13,6 +14,8 @@ export class ReplicationProducerService {
 		record: Record<string, any>,
 		sortKey?: string
 	) {
+		this.loggingService.info(`Replicating CREATE record: tableId=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey}`);
+
 		const message: ReplicationMessage = {
 			logIndex,
 			version: 0, // TBD
@@ -27,6 +30,8 @@ export class ReplicationProducerService {
 		await retry(async () => {
 			await this.publisher.publish(message);
 		});
+
+		this.loggingService.info(`Successfully replicated CREATE record: tableId=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey}`);
 	}
 
 	async replicateDeleteRecord(
@@ -35,6 +40,8 @@ export class ReplicationProducerService {
 		partitionKey: string,
 		sortKey?: string
 	) {
+		this.loggingService.info(`Replicating DELETE record: tableId=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey}`);
+
 		const message: ReplicationMessage = {
 			logIndex,
 			version: 0, // TBD
@@ -48,5 +55,7 @@ export class ReplicationProducerService {
 		await retry(async () => {
 			await this.publisher.publish(message);
 		});
+
+		this.loggingService.info(`Successfully replicated DELETE record: tableId=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey}`);
 	}
 }

@@ -1,116 +1,138 @@
 version: '3.9'
 services:
-  coordinator:
-    container_name: coordinator
-    build: ./coordinator
-    ports:
-      - "8080:8080"
-    networks:
-      - shardnet
+    coordinator:
+        container_name: coordinator
+        build: ./coordinator
+        ports:
+            - '8080:8080'
+        networks:
+            - shardnet
 
-  shard1:
-    build: ./shard
-    container_name: shard1
-    environment:
-      - ROLE=LEADER
-      - PORT=8000
-      - SHARD_ID=shardset-1
-      - ADDRESS=http://shard1:8000
-      - COORDINATOR_URL=http://coordinator:8080/api/shards
-      - RABBITMQ_URL=amqp://rabbitmq
-    ports:
-      - "8000:8000"
-    depends_on:
-      coordinator:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - shardnet
+    shard1:
+        build: ./shard
+        container_name: shard1
+        environment:
+            - ROLE=LEADER
+            - PORT=8000
+            - SHARD_ID=shardset-1
+            - SHARD_NAME=shard1
+            - ADDRESS=http://shard1:8000
+            - COORDINATOR_URL=http://coordinator:8080/api/shards
+            - RABBITMQ_URL=amqp://rabbitmq
+        ports:
+            - '8000:8000'
+        depends_on:
+            coordinator:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+        networks:
+            - shardnet
 
-  shard2:
-    build: ./shard
-    container_name: shard2
-    environment:
-      - ROLE=FOLLOWER
-      - PORT=8001
-      - SHARD_ID=shardset-1
-      - ADDRESS=http://shard2:8001
-      - COORDINATOR_URL=http://coordinator:8080/api/shards
-      - RABBITMQ_URL=amqp://rabbitmq
-    ports:
-      - "8001:8001"
-    depends_on:
-      coordinator:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - follower1-data:/app/data
-    networks:
-      - shardnet
+    shard2:
+        build: ./shard
+        container_name: shard2
+        environment:
+            - ROLE=FOLLOWER
+            - PORT=8001
+            - SHARD_ID=shardset-1
+            - SHARD_NAME=shard2
+            - ADDRESS=http://shard2:8001
+            - COORDINATOR_URL=http://coordinator:8080/api/shards
+            - RABBITMQ_URL=amqp://rabbitmq
+        ports:
+            - '8001:8001'
+        depends_on:
+            coordinator:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+        volumes:
+            - follower1-data:/app/data
+        networks:
+            - shardnet
 
-  shard3:
-    build: ./shard
-    container_name: shard3
-    environment:
-      - ROLE=FOLLOWER
-      - PORT=8002
-      - SHARD_ID=shardset-1
-      - ADDRESS=http://shard3:8002
-      - COORDINATOR_URL=http://coordinator:8080/api/shards
-      - RABBITMQ_URL=amqp://rabbitmq
-    ports:
-      - "8002:8002"
-    depends_on:
-      coordinator:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - follower2-data:/app/data
-    networks:
-      - shardnet
+    shard3:
+        build: ./shard
+        container_name: shard3
+        environment:
+            - ROLE=FOLLOWER
+            - PORT=8002
+            - SHARD_ID=shardset-1
+            - SHARD_NAME=shard3
+            - ADDRESS=http://shard3:8002
+            - COORDINATOR_URL=http://coordinator:8080/api/shards
+            - RABBITMQ_URL=amqp://rabbitmq
+        ports:
+            - '8002:8002'
+        depends_on:
+            coordinator:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+        volumes:
+            - follower2-data:/app/data
+        networks:
+            - shardnet
 
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: rabbitmq
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    healthcheck:
-      test: ["CMD", "rabbitmqctl", "status"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - shardnet
+    rabbitmq:
+        image: rabbitmq:3-management
+        container_name: rabbitmq
+        ports:
+            - '5672:5672'
+            - '15672:15672'
+        healthcheck:
+            test: ['CMD', 'rabbitmqctl', 'status']
+            interval: 5s
+            timeout: 3s
+            retries: 5
+        deploy:
+            resources:
+                limits:
+                    cpus: '1.0'
+                    memory: '512M'
+        networks:
+            - shardnet
 
-  prometheus:
-    image: prom/prometheus
-    container_name: prometheus
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-    networks:
-      - shardnet
+    prometheus:
+        image: prom/prometheus
+        container_name: prometheus
+        volumes:
+            - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+        ports:
+            - '9090:9090'
+        networks:
+            - shardnet
 
-  jaeger:
-    image: jaegertracing/jaeger:2.0.0
-    container_name: jaeger
-    command:
-      - "--set=receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317"
-    ports:
-      - "4317:4317"
-      - "16686:16686"
-    networks:
-      - shardnet
+    jaeger:
+        image: jaegertracing/jaeger:2.0.0
+        container_name: jaeger
+        command:
+            - '--set=receivers.otlp.protocols.grpc.endpoint=0.0.0.0:4317'
+        ports:
+            - '4317:4317'
+            - '16686:16686'
+        networks:
+            - shardnet
+
+    grafana:
+        image: grafana/grafana
+        container_name: grafana
+        ports:
+            - '3000:3000'
+        environment:
+            - GF_SECURITY_ADMIN_PASSWORD=admin
+        volumes:
+            - ./monitoring/grafana:/var/lib/grafana
+        depends_on:
+            - prometheus
+        networks:
+            - shardnet
 
 volumes:
-  follower1-data:
-  follower2-data:
+    follower1-data:
+    follower2-data:
 
 networks:
-  shardnet:
-    driver: bridge
+    shardnet:
+        driver: bridge

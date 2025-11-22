@@ -1,5 +1,6 @@
 import { ShardRole } from '../types/shardRole.enum';
 import { BloomFilterService } from './bloomFilter/bloomFilterService';
+import { LoggingService } from './logging/loggingService.interface';
 import { ReplicationProducerService } from './replication/replicationProducerService';
 
 export class RecordService {
@@ -9,39 +10,64 @@ export class RecordService {
 	constructor(
 		private bloomFilterService: BloomFilterService,
 		private role: ShardRole,
+		private loggingService: LoggingService,
 		private replicationService?: ReplicationProducerService
-	) {}
+	) { }
 
 	existsRecord(tableId: string, partitionKey: string, sortKey?: string): boolean {
-		if (!this.tables.has(tableId)) return false;
+		if (!this.tables.has(tableId)) {
+			this.loggingService.warn(`Checked record existence for non-existent table: ${tableId}`);
+			return false;
+		}
 		const table = this.tables.get(tableId);
 
 		const sk = sortKey || '';
-		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) return false;
+		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) {
+			this.loggingService.warn(`Bloom filter negative for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
+			return false;
+		}
 
-		if (!table?.has(partitionKey)) return false;
+		if (!table?.has(partitionKey)) {
+			this.loggingService.warn(`No partition found for table=${tableId} with partitionKey=${partitionKey}`);
+			return false;
+		}
 		const partition = table.get(partitionKey);
 
-		return partition?.has(sk) || false;
+		const exists = partition?.has(sk) || false;
+		this.loggingService.info(`Record existence check: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}, exists=${exists}`);
+		return exists;
 	}
 
 	getRecord(tableId: string, partitionKey: string, sortKey?: string): Record<string, any> | null {
-		if (!this.tables.has(tableId)) return null;
+		if (!this.tables.has(tableId)) {
+			this.loggingService.warn(`Attempted to get record for non-existent table: ${tableId}`);
+			return null;
+		}
 		const table = this.tables.get(tableId);
 
 		const sk = sortKey || '';
-		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) return null;
+		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) {
+			this.loggingService.warn(`Bloom filter negative for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
+			return null;
+		}
 
-		if (!table?.has(partitionKey)) return null;
+		if (!table?.has(partitionKey)) {
+			this.loggingService.warn(`No partition found for table=${tableId} with partitionKey=${partitionKey}`);
+			return null;
+		}
 		const partition = table.get(partitionKey);
 
 		const record = partition?.get(sk);
-		if (!record) return null;
+		if (!record) {
+			this.loggingService.warn(`No record found in table=${tableId} for partitionKey=${partitionKey}, sortKey=${sk}`);
+			return null;
+		}
 
 		if (!record._version) {
 			record._version = this.logIndex;
 		}
 
+		this.loggingService.info(`Record retrieved: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}, version=${record._version}`);
 		return record;
 	}
 
@@ -53,6 +79,7 @@ export class RecordService {
 	): Promise<boolean> {
 		this.logIndex++;
 		record._version = this.logIndex;
+
 		if (!this.tables.has(tableId)) {
 			this.tables.set(tableId, new Map());
 			this.bloomFilterService.createFilter(tableId);
@@ -76,25 +103,34 @@ export class RecordService {
 			);
 		}
 
-		console.log(
-			`Record ${record} added to table ${tableId} with partitionKey ${partitionKey} and sortKey ${sk}`
-		);
-
+		this.loggingService.info(`Record added: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}, version=${record._version}`);
 		return true;
 	}
 
 	async deleteRecord(tableId: string, partitionKey: string, sortKey?: string): Promise<boolean> {
-		if (!this.tables.has(tableId)) return false;
+		if (!this.tables.has(tableId)) {
+			this.loggingService.warn(`Attempted to delete record from non-existent table: ${tableId}`);
+			return false;
+		}
 		const table = this.tables.get(tableId);
 
 		const sk = sortKey || '';
-		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) return false;
+		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) {
+			this.loggingService.warn(`Bloom filter negative for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
+			return false;
+		}
 
-		if (!table?.has(partitionKey)) return false;
+		if (!table?.has(partitionKey)) {
+			this.loggingService.warn(`No partition found for table=${tableId} with partitionKey=${partitionKey}`);
+			return false;
+		}
 		const partition = table.get(partitionKey);
 
 		const isDeleted = partition?.delete(sk);
-		if (!isDeleted) return false;
+		if (!isDeleted) {
+			this.loggingService.warn(`No record found to delete in table=${tableId} for partitionKey=${partitionKey}, sortKey=${sk}`);
+			return false;
+		}
 
 		if (partition?.size === 0) table.delete(partitionKey);
 
@@ -108,6 +144,7 @@ export class RecordService {
 			);
 		}
 
+		this.loggingService.info(`Record deleted: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
 		return true;
 	}
 }
