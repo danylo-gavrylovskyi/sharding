@@ -1,18 +1,24 @@
+import os from 'os';
 import { ShardRole } from '../types/shardRole.enum';
 import { BloomFilterService } from './bloomFilter/bloomFilterService';
 import { LoggingService } from './logging/loggingService.interface';
 import { ReplicationProducerService } from './replication/replicationProducerService';
+import { MetricsService } from './metricService';
 
 export class RecordService {
 	private tables: Map<string, Map<string, Map<string, Record<string, any>>>> = new Map();
-	private logIndex = 0;
+	private instance: string;
 
 	constructor(
 		private bloomFilterService: BloomFilterService,
 		private role: ShardRole,
 		private loggingService: LoggingService,
+		private metricsService: MetricsService,
 		private replicationService?: ReplicationProducerService
-	) { }
+	) {
+		this.instance = process.env.SHARD_NAME || os.hostname();
+		this.startMetricsCollection();
+	}
 
 	existsRecord(tableId: string, partitionKey: string, sortKey?: string): boolean {
 		if (!this.tables.has(tableId)) {
@@ -22,10 +28,8 @@ export class RecordService {
 		const table = this.tables.get(tableId);
 
 		const sk = sortKey || '';
-		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) {
-			this.loggingService.warn(`Bloom filter negative for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
-			return false;
-		}
+
+		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) return false;
 
 		if (!table?.has(partitionKey)) {
 			this.loggingService.warn(`No partition found for table=${tableId} with partitionKey=${partitionKey}`);
@@ -39,6 +43,8 @@ export class RecordService {
 	}
 
 	getRecord(tableId: string, partitionKey: string, sortKey?: string): Record<string, any> | null {
+		this.metricsService.recordReadsCounter.inc({ table_id: tableId, instance: this.instance });
+
 		if (!this.tables.has(tableId)) {
 			this.loggingService.warn(`Attempted to get record for non-existent table: ${tableId}`);
 			return null;
@@ -46,10 +52,8 @@ export class RecordService {
 		const table = this.tables.get(tableId);
 
 		const sk = sortKey || '';
-		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) {
-			this.loggingService.warn(`Bloom filter negative for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
-			return null;
-		}
+
+		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) return null;
 
 		if (!table?.has(partitionKey)) {
 			this.loggingService.warn(`No partition found for table=${tableId} with partitionKey=${partitionKey}`);
@@ -63,11 +67,7 @@ export class RecordService {
 			return null;
 		}
 
-		if (!record._version) {
-			record._version = this.logIndex;
-		}
-
-		this.loggingService.info(`Record retrieved: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}, version=${record._version}`);
+		this.loggingService.info(`Record retrieved: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
 		return record;
 	}
 
@@ -77,8 +77,11 @@ export class RecordService {
 		record: Record<string, any>,
 		sortKey?: string
 	): Promise<boolean> {
-		this.logIndex++;
-		record._version = this.logIndex;
+		if (this.role === ShardRole.LEADER) {
+			record._timestamp = Date.now()
+		}
+
+		this.metricsService.recordCreatesCounter.inc({ table_id: tableId, instance: this.instance });
 
 		if (!this.tables.has(tableId)) {
 			this.tables.set(tableId, new Map());
@@ -90,12 +93,18 @@ export class RecordService {
 		const partition = table?.get(partitionKey);
 
 		const sk = sortKey || '';
+
+		const existingRecord = partition?.get(sk)
+		if (existingRecord && existingRecord._timestamp > record._timestamp) {
+			this.loggingService.warn(`Attempted to add older record to table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
+			return false;
+		}
 		partition?.set(sk, record);
+
 		this.bloomFilterService.add(tableId, `${partitionKey}::${sk}`);
 
 		if (this.role === ShardRole.LEADER && this.replicationService) {
 			await this.replicationService.replicateCreateRecord(
-				this.logIndex,
 				tableId,
 				partitionKey,
 				record,
@@ -103,11 +112,13 @@ export class RecordService {
 			);
 		}
 
-		this.loggingService.info(`Record added: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}, version=${record._version}`);
+		this.loggingService.info(`Record added: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
 		return true;
 	}
 
 	async deleteRecord(tableId: string, partitionKey: string, sortKey?: string): Promise<boolean> {
+		this.metricsService.recordDeletesCounter.inc({ table_id: tableId, instance: this.instance });
+
 		if (!this.tables.has(tableId)) {
 			this.loggingService.warn(`Attempted to delete record from non-existent table: ${tableId}`);
 			return false;
@@ -115,10 +126,8 @@ export class RecordService {
 		const table = this.tables.get(tableId);
 
 		const sk = sortKey || '';
-		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) {
-			this.loggingService.warn(`Bloom filter negative for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
-			return false;
-		}
+
+		if (!this.bloomFilterService.has(tableId, `${partitionKey}::${sk}`)) return false;
 
 		if (!table?.has(partitionKey)) {
 			this.loggingService.warn(`No partition found for table=${tableId} with partitionKey=${partitionKey}`);
@@ -134,10 +143,8 @@ export class RecordService {
 
 		if (partition?.size === 0) table.delete(partitionKey);
 
-		this.logIndex++;
 		if (this.role === ShardRole.LEADER && this.replicationService) {
 			await this.replicationService.replicateDeleteRecord(
-				this.logIndex,
 				tableId,
 				partitionKey,
 				sortKey
@@ -146,5 +153,31 @@ export class RecordService {
 
 		this.loggingService.info(`Record deleted: table=${tableId}, partitionKey=${partitionKey}, sortKey=${sk}`);
 		return true;
+	}
+
+	private startMetricsCollection(): void {
+		setInterval(() => {
+			this.updateStorageMetrics();
+		}, 15000);
+	}
+
+	private updateStorageMetrics(): void {
+		let totalRecords = 0;
+
+		for (const [tableId, table] of this.tables) {
+			let tableRecordCount = 0;
+
+			for (const partition of table.values()) {
+				tableRecordCount += partition.size;
+			}
+
+			totalRecords += tableRecordCount;
+			this.metricsService.recordsPerTableGauge.set(
+				{ table_id: tableId, instance: this.instance },
+				tableRecordCount
+			);
+		}
+
+		this.metricsService.totalRecordsGauge.set({ instance: this.instance }, totalRecords);
 	}
 }

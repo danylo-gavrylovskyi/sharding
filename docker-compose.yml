@@ -19,6 +19,7 @@ services:
             - ADDRESS=http://shard1:8000
             - COORDINATOR_URL=http://coordinator:8080/api/shards
             - RABBITMQ_URL=amqp://rabbitmq
+            - EXCHANGE_NAME=replication1
         ports:
             - '8000:8000'
         depends_on:
@@ -40,6 +41,7 @@ services:
             - ADDRESS=http://shard2:8001
             - COORDINATOR_URL=http://coordinator:8080/api/shards
             - RABBITMQ_URL=amqp://rabbitmq
+            - EXCHANGE_NAME=replication1
         ports:
             - '8001:8001'
         depends_on:
@@ -63,8 +65,79 @@ services:
             - ADDRESS=http://shard3:8002
             - COORDINATOR_URL=http://coordinator:8080/api/shards
             - RABBITMQ_URL=amqp://rabbitmq
+            - EXCHANGE_NAME=replication1
         ports:
             - '8002:8002'
+        depends_on:
+            coordinator:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+        volumes:
+            - follower2-data:/app/data
+        networks:
+            - shardnet
+
+    shard4:
+        build: ./shard
+        container_name: shard4
+        environment:
+            - ROLE=LEADER
+            - PORT=8003
+            - SHARD_ID=shardset-2
+            - SHARD_NAME=shard4
+            - ADDRESS=http://shard4:8003
+            - COORDINATOR_URL=http://coordinator:8080/api/shards
+            - RABBITMQ_URL=amqp://rabbitmq
+            - EXCHANGE_NAME=replication2
+        ports:
+            - '8003:8003'
+        depends_on:
+            coordinator:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+        networks:
+            - shardnet
+
+    shard5:
+        build: ./shard
+        container_name: shard5
+        environment:
+            - ROLE=FOLLOWER
+            - PORT=8004
+            - SHARD_ID=shardset-2
+            - SHARD_NAME=shard5
+            - ADDRESS=http://shard5:8004
+            - COORDINATOR_URL=http://coordinator:8080/api/shards
+            - RABBITMQ_URL=amqp://rabbitmq
+            - EXCHANGE_NAME=replication2
+        ports:
+            - '8004:8004'
+        depends_on:
+            coordinator:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+        volumes:
+            - follower1-data:/app/data
+        networks:
+            - shardnet
+
+    shard6:
+        build: ./shard
+        container_name: shard6
+        environment:
+            - ROLE=FOLLOWER
+            - PORT=8005
+            - SHARD_ID=shardset-2
+            - SHARD_NAME=shard6
+            - ADDRESS=http://shard6:8005
+            - COORDINATOR_URL=http://coordinator:8080/api/shards
+            - RABBITMQ_URL=amqp://rabbitmq
+            - EXCHANGE_NAME=replication2
+        ports:
+            - '8005:8005'
         depends_on:
             coordinator:
                 condition: service_started
@@ -99,8 +172,20 @@ services:
         container_name: prometheus
         volumes:
             - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+            - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml
+            - prometheus-data:/prometheus
         ports:
             - '9090:9090'
+        networks:
+            - shardnet
+
+    alertmanager:
+        image: prom/alertmanager
+        container_name: alertmanager
+        volumes:
+            - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+        ports:
+            - '9093:9093'
         networks:
             - shardnet
 
@@ -129,9 +214,20 @@ services:
         networks:
             - shardnet
 
+    n8n:
+        image: n8nio/n8n
+        container_name: n8n
+        volumes:
+            - C:\n8n:/home/node/.n8n
+        ports:
+            - '5678:5678'
+        networks:
+            - shardnet
+
 volumes:
     follower1-data:
     follower2-data:
+    prometheus-data:
 
 networks:
     shardnet:

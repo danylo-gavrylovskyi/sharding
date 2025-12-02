@@ -4,6 +4,7 @@ import { AddRecordDto } from 'src/dtos/addRecordDto';
 import { ConsistentHashRing } from './consistentHashingService';
 import { ShardingKeys } from 'src/types/shardingKeys';
 import { LoggingService } from './logging/loggingService.interface';
+import { MetricsService } from './metricService';
 
 export class TableService {
 	private tables: Map<string, ShardingKeys> = new Map();
@@ -11,8 +12,11 @@ export class TableService {
 	constructor(
 		private ring: ConsistentHashRing,
 		private shardService: ShardService,
-		private loggingService: LoggingService
-	) { }
+		private loggingService: LoggingService,
+		private metricsService: MetricsService
+	) {
+		this.startMetricsCollection();
+	}
 
 	listTables() {
 		return Array.from(this.tables.entries()).map(([id, def]) => ({
@@ -29,6 +33,8 @@ export class TableService {
 
 		this.tables.set(tableId, { partitionKey: partitionKey, sortKey });
 		this.loggingService.info(`Table created: id=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey || 'N/A'}`);
+
+		this.metricsService.totalTablesGauge.set(this.tables.size);
 
 		return true;
 	}
@@ -109,7 +115,7 @@ export class TableService {
 					this.loggingService.info(`Fetched record from shard at ${address} for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey || 'N/A'}`);
 					return {
 						data: response.data,
-						version: response.data._version || 0,
+						timestamp: response.data._timestamp || Date.now(),
 						success: true,
 					};
 				} catch (error) {
@@ -121,7 +127,7 @@ export class TableService {
 
 		const successfulResponses = responses
 			.filter(
-				(r): r is PromiseFulfilledResult<{ data: any; version: number; success: boolean }> =>
+				(r): r is PromiseFulfilledResult<{ data: any; timestamp: number; success: boolean }> =>
 					r.status === 'fulfilled' && r.value.success
 			)
 			.map((r) => r.value);
@@ -132,9 +138,9 @@ export class TableService {
 		}
 
 		const newestVersion = successfulResponses.reduce((newest, current) => {
-			return current.version > newest.version ? current : newest;
+			return current.timestamp > newest.timestamp ? current : newest;
 		}, successfulResponses[0]);
-		this.loggingService.info(`Returning newest record version=${newestVersion.version} for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey || 'N/A'}`);
+		this.loggingService.info(`Returning newest record timestamp=${newestVersion.timestamp} for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey || 'N/A'}`);
 
 		return { data: newestVersion.data };
 	}
@@ -160,6 +166,9 @@ export class TableService {
 		try {
 			const response = await axios.post(url, dto, { timeout: 5000 });
 			this.loggingService.info(`Record added to table=${tableId} at shard ${shardAddress} for partitionKey=${dto.partitionKey}, sortKey=${dto.sortKey || 'N/A'}`);
+
+			this.updateShardDistributionMetrics();
+
 			return response.status === 201;
 		} catch (error) {
 			this.loggingService.error(`Error adding record to shard at ${shardAddress}: ${error}`);
@@ -212,5 +221,28 @@ export class TableService {
 	private getShardId(tableId: string, partitionKey: string): string | null {
 		const keyHash = `${tableId}::${partitionKey}`;
 		return this.ring.getServer(keyHash);
+	}
+
+	private startMetricsCollection(): void {
+		setInterval(() => {
+			this.updateShardDistributionMetrics();
+		}, 30000);
+	}
+
+	private updateShardDistributionMetrics(): void {
+		const shardKeyCount = new Map<string, number>();
+
+		for (const tableId of this.tables.keys()) {
+			for (const key of this.tables.values()) {
+				const shardId = this.getShardId(tableId, key.partitionKey);
+				if (shardId) {
+					shardKeyCount.set(shardId, (shardKeyCount.get(shardId) || 0) + 1);
+				}
+			}
+		}
+
+		this.shardService.updateShardDistribution(
+			shardKeyCount
+		);
 	}
 }

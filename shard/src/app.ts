@@ -32,14 +32,14 @@ const ROLE: ShardRole = (process.env.ROLE as ShardRole) || ShardRole.FOLLOWER;
 const RABBITMQ_URL: string = process.env.RABBITMQ_URL || 'amqp://localhost';
 const EXCHANGE_NAME: string = process.env.EXCHANGE_NAME || 'replication';
 
-const metricService = new MetricsService('coordinator');
+const metricService = new MetricsService('shard');
 const loggingService = new PinoLoggingService();
 const registrationService = new ShardRegistrationService(COORDINATOR_URL, {
 	shardId: SHARD_ID,
 	address: ADDRESS,
 	role: ROLE,
 }, loggingService);
-const bloomFilterService = new BloomFilterService();
+const bloomFilterService = new BloomFilterService(loggingService, metricService);
 const offsetStoreService = new FileOffsetStoreService(loggingService);
 const rabbitMQService = new RabbitMQService(RABBITMQ_URL, EXCHANGE_NAME, loggingService);
 
@@ -52,15 +52,16 @@ async function bootstrap() {
 	let recordService: RecordService;
 
 	if (ROLE === ShardRole.LEADER) {
-		const replicationProducerService = new ReplicationProducerService(rabbitMQService, loggingService);
-		recordService = new RecordService(bloomFilterService, ROLE, loggingService, replicationProducerService);
+		const replicationProducerService = new ReplicationProducerService(rabbitMQService, loggingService, metricService);
+		recordService = new RecordService(bloomFilterService, ROLE, loggingService, metricService, replicationProducerService);
 	} else {
-		recordService = new RecordService(bloomFilterService, ROLE, loggingService);
+		recordService = new RecordService(bloomFilterService, ROLE, loggingService, metricService);
 		const replicationConsumerService = new ReplicationConsumerService(
 			rabbitMQService,
 			recordService,
 			offsetStoreService,
-			loggingService
+			loggingService,
+			metricService
 		);
 		await replicationConsumerService.start();
 	}

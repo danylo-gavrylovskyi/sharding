@@ -9,5 +9,13 @@ export const createMetricRoutes = (metricService: MetricsService) => {
 		res.send(await metricService.metrics());
 	});
 
+	router.get('/health', (_, res) => {
+		res.status(200).json({
+			status: 'healthy',
+			timestamp: new Date().toISOString(),
+			uptime: process.uptime(),
+		});
+	});
+
 	return router;
 };

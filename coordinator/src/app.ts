@@ -25,8 +25,8 @@ const REPLICAS_COUNT = Number(process.env.REPLICAS_COUNT || 3);
 const metricService = new MetricsService('coordinator');
 const loggingService = new PinoLoggingService();
 const consistentHashingService = new ConsistentHashRing(REPLICAS_COUNT);
-const shardService = new ShardService(consistentHashingService, loggingService);
-const tableService = new TableService(consistentHashingService, shardService, loggingService);
+const shardService = new ShardService(consistentHashingService, loggingService, metricService);
+const tableService = new TableService(consistentHashingService, shardService, loggingService, metricService);
 
 export const shardController = new ShardController(shardService);
 export const tableController = new TableController(tableService);

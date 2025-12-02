@@ -1,0 +1,8 @@
+receivers:
+    - name: n8n_webhook
+      webhook_configs:
+          - url: http://n8n:5678/webhook-test/02a8fc46-b16a-4f1f-a8ec-426ae2ffdbcd
+            send_resolved: true
+
+route:
+    receiver: n8n_webhook
