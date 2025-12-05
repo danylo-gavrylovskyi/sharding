@@ -1,27 +1,31 @@
 global:
-    scrape_interval: 15s
+   scrape_interval: 15s
 
 rule_files:
-    - '/etc/prometheus/alerts.yml'
+   - '/etc/prometheus/alerts.yml'
 
 alerting:
-    alertmanagers:
-        - static_configs:
-              - targets:
-                    - 'alertmanager:9093'
+   alertmanagers:
+      - static_configs:
+           - targets:
+                - 'alertmanager:9093'
 
 scrape_configs:
-    - job_name: 'coordinator'
-      static_configs:
-          - targets: ['coordinator:8080']
-            labels:
-                instance: 'coordinator'
-      metrics_path: /api/metrics
+   - job_name: 'coordinator'
+     static_configs:
+        - targets: ['coordinator:8080']
+          labels:
+             instance: 'coordinator'
+     metrics_path: /api/metrics
 
-    - job_name: 'shards'
-      static_configs:
-          - targets:
-                - 'shard1:8000'
-                - 'shard2:8001'
-                - 'shard3:8002'
-      metrics_path: '/internal/metrics'
+   - job_name: 'shards'
+     static_configs:
+        - targets:
+             - 'shard1:8000'
+             - 'shard2:8001'
+             - 'shard3:8002'
+     metrics_path: '/internal/metrics'
+
+   - job_name: node_exporter
+     static_configs:
+        - targets: ['node_exporter:9100']
