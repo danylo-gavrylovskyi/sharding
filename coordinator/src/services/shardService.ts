@@ -10,6 +10,9 @@ export class ShardService {
 	private shards: Map<string, ShardMetadata> = new Map();
 	private replicaSets: Map<string, ReplicaSet> = new Map();
 
+	private consecutiveFailures: Map<string, number> = new Map();
+	private readonly MAX_FAILURES: number = 3;
+
 	constructor(
 		private ring: ConsistentHashRing,
 		private loggingService: LoggingService,
@@ -160,13 +163,36 @@ export class ShardService {
 		let healthyCount = 0;
 		let unhealthyCount = 0;
 
-		for (const [address, shard] of this.shards) {
+		const currentAddresses = Array.from(this.shards.keys())
+
+		for (const address of currentAddresses) {
+			const shard = this.shards.get(address)
+			if (!shard) continue
+
 			try {
-				await axios.get(`${address}/internal/health`, { timeout: 5000 });
+				await axios.get(`${address}/internal/health`, { timeout: 2000 });
+				if (this.consecutiveFailures.has(address)) {
+					this.consecutiveFailures.delete(address)
+					this.loggingService.info(`Shard ${shard.shardId} (${address}) recovered.`);
+				}
 				healthyCount++;
 			} catch (error) {
-				unhealthyCount++;
-				this.loggingService.warn(`Shard at ${address} (${shard.shardId}) health check failed: ${error}`);
+				unhealthyCount++
+
+				const failures = (this.consecutiveFailures.get(address) || 0) + 1
+				this.consecutiveFailures.set(address, failures)
+
+				this.loggingService.warn(
+					`Shard ${shard.shardId} (${address}) failed health check (${failures}/${this.MAX_FAILURES})`
+				);
+
+				if (failures >= this.MAX_FAILURES) {
+					this.loggingService.error(
+						`Shard ${shard.shardId} is dead. Removing from cluster.`
+					);
+					this.removeShard(address)
+					this.consecutiveFailures.delete(address)
+				}
 			}
 		}
 

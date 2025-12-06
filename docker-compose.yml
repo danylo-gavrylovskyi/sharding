@@ -81,20 +81,17 @@ services:
     shard4:
         build: ./shard
         container_name: shard4
-        profiles: ["standby"]
         environment:
-            - ROLE=FOLLOWER
+            - ROLE=LEADER
             - PORT=8003
-            - SHARD_ID=shardset-1
+            - SHARD_ID=shardset-2
             - SHARD_NAME=shard4
             - ADDRESS=http://shard4:8003
             - COORDINATOR_URL=http://coordinator:8080/api/shards
             - RABBITMQ_URL=amqp://rabbitmq
-            - EXCHANGE_NAME=replication1
+            - EXCHANGE_NAME=replication2
         ports:
             - '8003:8003'
-        volumes:
-            - follower3-data:/app/data
         depends_on:
             coordinator:
                 condition: service_started
@@ -106,109 +103,64 @@ services:
     shard5:
         build: ./shard
         container_name: shard5
-        profiles: ["standby"]
         environment:
             - ROLE=FOLLOWER
             - PORT=8004
-            - SHARD_ID=shardset-1
+            - SHARD_ID=shardset-2
             - SHARD_NAME=shard5
             - ADDRESS=http://shard5:8004
             - COORDINATOR_URL=http://coordinator:8080/api/shards
             - RABBITMQ_URL=amqp://rabbitmq
-            - EXCHANGE_NAME=replication1
+            - EXCHANGE_NAME=replication2
         ports:
             - '8004:8004'
-        volumes:
-            - follower4-data:/app/data
         depends_on:
             coordinator:
                 condition: service_started
             rabbitmq:
                 condition: service_healthy
+        volumes:
+            - follower3-data:/app/data
+        networks:
+            - shardnet
+
+    shard6:
+        build: ./shard
+        container_name: shard6
+        environment:
+            - ROLE=FOLLOWER
+            - PORT=8005
+            - SHARD_ID=shardset-2
+            - SHARD_NAME=shard6
+            - ADDRESS=http://shard6:8005
+            - COORDINATOR_URL=http://coordinator:8080/api/shards
+            - RABBITMQ_URL=amqp://rabbitmq
+            - EXCHANGE_NAME=replication2
+        ports:
+            - '8005:8005'
+        depends_on:
+            coordinator:
+                condition: service_started
+            rabbitmq:
+                condition: service_healthy
+        volumes:
+            - follower4-data:/app/data
         networks:
             - shardnet
 
     autoscaler:
         build: ./autoscaler
         container_name: autoscaler
+        environment:
+            - PROMETHEUS_URL=http://prometheus:9090
+            - SCALING_GROUP=shard4,shard5,shard6
         volumes:
             - /var/run/docker.sock:/var/run/docker.sock
-        working_dir: /app
         depends_on:
             - coordinator
-        restart: always
+            - prometheus
         networks:
             - shardnet
-
-    # shard4:
-    #     build: ./shard
-    #     container_name: shard4
-    #     environment:
-    #         - ROLE=LEADER
-    #         - PORT=8003
-    #         - SHARD_ID=shardset-2
-    #         - SHARD_NAME=shard4
-    #         - ADDRESS=http://shard4:8003
-    #         - COORDINATOR_URL=http://coordinator:8080/api/shards
-    #         - RABBITMQ_URL=amqp://rabbitmq
-    #         - EXCHANGE_NAME=replication2
-    #     ports:
-    #         - '8003:8003'
-    #     depends_on:
-    #         coordinator:
-    #             condition: service_started
-    #         rabbitmq:
-    #             condition: service_healthy
-    #     networks:
-    #         - shardnet
-
-    # shard5:
-    #     build: ./shard
-    #     container_name: shard5
-    #     environment:
-    #         - ROLE=FOLLOWER
-    #         - PORT=8004
-    #         - SHARD_ID=shardset-2
-    #         - SHARD_NAME=shard5
-    #         - ADDRESS=http://shard5:8004
-    #         - COORDINATOR_URL=http://coordinator:8080/api/shards
-    #         - RABBITMQ_URL=amqp://rabbitmq
-    #         - EXCHANGE_NAME=replication2
-    #     ports:
-    #         - '8004:8004'
-    #     depends_on:
-    #         coordinator:
-    #             condition: service_started
-    #         rabbitmq:
-    #             condition: service_healthy
-    #     volumes:
-    #         - follower1-data:/app/data
-    #     networks:
-    #         - shardnet
-
-    # shard6:
-    #     build: ./shard
-    #     container_name: shard6
-    #     environment:
-    #         - ROLE=FOLLOWER
-    #         - PORT=8005
-    #         - SHARD_ID=shardset-2
-    #         - SHARD_NAME=shard6
-    #         - ADDRESS=http://shard6:8005
-    #         - COORDINATOR_URL=http://coordinator:8080/api/shards
-    #         - RABBITMQ_URL=amqp://rabbitmq
-    #         - EXCHANGE_NAME=replication2
-    #     ports:
-    #         - '8005:8005'
-    #     depends_on:
-    #         coordinator:
-    #             condition: service_started
-    #         rabbitmq:
-    #             condition: service_healthy
-    #     volumes:
-    #         - follower2-data:/app/data
-    #     networks:
-    #         - shardnet
 
     rabbitmq:
         image: rabbitmq:3-management
@@ -241,11 +193,17 @@ services:
         networks:
             - shardnet
 
-    node_exporter:
-        image: prom/node-exporter
-        container_name: node_exporter
+    cadvisor:
+        image: gcr.io/cadvisor/cadvisor:latest
+        container_name: cadvisor
         ports:
-            - "9100:9100"
+            - '8081:8080'
+        volumes:
+            - /:/rootfs:ro
+            - /var/run:/var/run:ro
+            - /sys:/sys:ro
+            - /var/lib/docker/:/var/lib/docker:ro
+            - /dev/disk/:/dev/disk:ro
         networks:
             - shardnet
 
@@ -284,15 +242,15 @@ services:
         networks:
             - shardnet
 
-    n8n:
-        image: n8nio/n8n
-        container_name: n8n
-        volumes:
-            - C:\n8n:/home/node/.n8n
-        ports:
-            - '5678:5678'
-        networks:
-            - shardnet
+    # n8n:
+    #     image: n8nio/n8n
+    #     container_name: n8n
+    #     volumes:
+    #         - C:\n8n:/home/node/.n8n
+    #     ports:
+    #         - '5678:5678'
+    #     networks:
+    #         - shardnet
 
 volumes:
     follower1-data:

@@ -1,102 +1,137 @@
 import axios from 'axios';
-// import { exec as execCb } from 'child_process';
-// import { promisify } from 'util';
 import Docker from 'dockerode';
-// const exec = promisify(execCb);
 
-export class AutoScalerService {
-	interval = null;
-	coreShardsCount = Number(process.env.CORE_SHARDS_COUNT || 3);
-	standbyShardsCount = Number(process.env.STANDBY_SHARDS_COUNT || 2);
-	docker = new Docker({ socketPath: '/var/run/docker.sock' });
+const PROMETHEUS_URL = process.env.PROMETHEUS_URL || 'http://prometheus:9090';
+const SCALING_GROUP = (process.env.SCALING_GROUP || 'shard4,shard5,shard6').split(',');
 
-	activeShards = [];
-	standbyShards = [];
+const LATENCY_THRESHOLD = 200; // ms
+const CPU_THRESHOLD = 70; // %
+const SCALE_DOWN_MINUTES = 1;
 
-	constructor(prometheusUrl, checkIntervalMs = 60000) {
-		this.prometheusUrl = prometheusUrl;
-		this.checkIntervalMs = checkIntervalMs;
+const docker = new Docker({socketPath: '/var/run/docker.sock'});
+let lowLoadStartTime = null;
+let isToggling = false;
 
-		for (let i = 1; i <= this.coreShardsCount; i++) {
-			this.activeShards.push(`shard${i}`);
-		}
-		for (
-			let i = this.coreShardsCount + 1;
-			i <= this.coreShardsCount + this.standbyShardsCount;
-			i++
-		) {
-			this.standbyShards.push(`shard${i}`);
-		}
-	}
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
-	start() {
-		if (this.interval) return;
-
-		console.log('Autoscaler started...');
-		this.interval = setInterval(() => this.tick(), this.checkIntervalMs);
-	}
-
-	stop() {
-		if (!this.interval) return;
-		clearInterval(this.interval);
-		this.interval = null;
-	}
-
-	async queryPrometheus(query) {
-		const url = `${this.prometheusUrl}/api/v1/query`;
-
-		const res = await axios.get(url, { params: { query } });
-		return res.data.data.result;
-	}
-
-	async tick() {
-		try {
-			const cpuQuery = `100 - (avg by(instance)(rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)`;
-			const cpuData = await this.queryPrometheus(cpuQuery);
-			const cpu = Number(cpuData[0].value[1]);
-
-			const latencyQuery = `histogram_quantile(0.99, sum(rate(coordinator_request_latency_bucket[1m])) by (le))`;
-			const latencyData = await this.queryPrometheus(latencyQuery);
-			const p99Latency = Number(latencyData[0].value[1]);
-
-			console.log('Autoscaler check, CPU =', cpu);
-			console.log('Autoscaler check, P99 latency =', p99Latency);
-
-			const CPU_SCALE_UP = 2;
-			const CPU_SCALE_DOWN = 1.6;
-
-			const LAT_UP = 0.5;
-			// const LAT_DOWN = 0.3;
-			// const LAT_UP = 0.0049;
-			const LAT_DOWN = 0.001;
-
-			if (cpu > CPU_SCALE_UP || p99Latency > LAT_UP) {
-				if (this.standbyShards.length === 0) {
-					console.log('No standby shards available to scale up');
-					return;
-				}
-
-				const nextShard = this.standbyShards.shift();
-				console.log('Adding a new shard %s', nextShard);
-				// await exec(`docker-compose up -d ${nextShard}`);
-				await this.docker.getContainer(nextShard).start();
-				this.activeShards.push(nextShard);
-			}
-
-			if (cpu < CPU_SCALE_DOWN || p99Latency < LAT_DOWN) {
-				if (this.activeShards.length <= this.coreShardsCount) {
-					console.log('At minimum core shards, cannot scale down further');
-					return;
-				}
-
-				console.log('CPU low → removing one shard');
-				const shardToStop = this.activeShards.pop();
-				// await exec(`docker-compose stop ${shardToStop}`);
-				await this.docker.getContainer(shardToStop).stop();
-				this.standbyShards.unshift(shardToStop);
-			}
-		} catch (e) {
-			console.error('Autoscaler tick error:', e);
-		}
-	}
+async function getP99Latency() {
+    const query = `histogram_quantile(0.99, sum(rate(shard_request_latency_bucket[1m])) by (le))`;
+    try {
+        const res = await axios.get(`${PROMETHEUS_URL}/api/v1/query`, {params: {query}});
+        const result = res.data.data.result;
+        return result.length > 0 ? parseFloat(result[0].value[1]) * 1000 : 0;
+    } catch (error) {
+        console.error('Metrics Error:', error.message);
+        return 0;
+    }
 }
+
+async function getMaxCpu() {
+    const query = `max(rate(container_cpu_usage_seconds_total{name=~"shard.*"}[1m])) * 100`;
+    try {
+        const res = await axios.get(`${PROMETHEUS_URL}/api/v1/query`, {params: {query}});
+        const result = res.data.data.result;
+        return result.length > 0 ? parseFloat(result[0].value[1]) : 0;
+    } catch (e) {
+        console.error('Metrics Error:', error.message);
+        return 0;
+    }
+}
+
+async function getGroupStatus() {
+    let runningCount = 0;
+    for (const name of SCALING_GROUP) {
+        try {
+            const c = docker.getContainer(name);
+            const info = await c.inspect();
+            if (info.State.Status === 'running') runningCount++;
+        } catch (error) {}
+    }
+
+    if (runningCount === SCALING_GROUP.length) return 'running';
+    if (runningCount === 0) return 'stopped';
+    return 'mixed';
+}
+
+async function startGroup() {
+    console.log(`🚀 Scaling UP: Starting ShardSet-2 (${SCALING_GROUP.join(', ')})...`);
+    await Promise.all(
+        SCALING_GROUP.map(async (name) => {
+            try {
+                const container = docker.getContainer(name);
+                const info = await container.inspect();
+                if (info.State.Status !== 'running') {
+                    await container.start();
+                    console.log(`   -> ${name} started.`);
+                }
+            } catch (error) {
+                console.error(`Failed to start ${name}`, error.message);
+            }
+        }),
+    );
+
+    await sleep(10000);
+}
+
+async function stopGroup() {
+    console.log(`🛑 Scaling DOWN: Stopping ShardSet-2 (${SCALING_GROUP.join(', ')})...`);
+
+    const reversed = [...SCALING_GROUP].reverse();
+
+    for (const name of reversed) {
+        try {
+            const container = docker.getContainer(name);
+            const info = await container.inspect();
+            if (info.State.Status === 'running') {
+                await container.stop();
+                console.log(`   -> ${name} stopped.`);
+            }
+        } catch (error) {
+            console.error(`Failed to stop ${name}`, error.message);
+        }
+    }
+}
+
+async function tick() {
+    if (isToggling) return;
+
+    const latency = await getP99Latency();
+    const cpu = await getMaxCpu();
+    const status = await getGroupStatus();
+
+    console.log(
+        `[Monitor] Latency: ${latency.toFixed(0)}ms | CPU: ${cpu.toFixed(
+            1,
+        )}% | ShardSet-2: ${status}`,
+    );
+
+    if (latency > LATENCY_THRESHOLD || cpu > CPU_THRESHOLD) {
+        lowLoadStartTime = null;
+
+        if (status !== 'running') {
+            isToggling = true;
+            await startGroup();
+            isToggling = false;
+        }
+    } else if (latency < LATENCY_THRESHOLD / 2 || cpu < CPU_THRESHOLD / 2) {
+        if (!lowLoadStartTime) {
+            console.log('   Timer started for Scale Down...');
+            lowLoadStartTime = Date.now();
+        } else {
+            const elapsedMinutes = (Date.now() - lowLoadStartTime) / 1000 / 60;
+            if (elapsedMinutes > SCALE_DOWN_MINUTES) {
+                if (status !== 'stopped') {
+                    isToggling = true;
+                    await stopGroup();
+                    isToggling = false;
+                }
+                lowLoadStartTime = null;
+            }
+        }
+    } else {
+        lowLoadStartTime = null;
+    }
+}
+
+setInterval(tick, 5000);
+console.log('Autoscaler for ShardSet-2 started.');
