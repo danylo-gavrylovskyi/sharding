@@ -15,6 +15,7 @@ import { createRoutes } from './routes';
 import { MetricsService } from './services/metricService';
 import { createMetricMiddleware } from './middlewares/metricMiddleware';
 import { PinoLoggingService } from './services/logging/pinoLoggingService';
+import { MigrationService } from './services/migrationService';
 
 const app = express();
 app.use(express.json());
@@ -26,7 +27,13 @@ const metricService = new MetricsService('coordinator');
 const loggingService = new PinoLoggingService();
 const consistentHashingService = new ConsistentHashRing(REPLICAS_COUNT);
 const shardService = new ShardService(consistentHashingService, loggingService, metricService);
-const tableService = new TableService(consistentHashingService, shardService, loggingService, metricService);
+const migrationService = new MigrationService(shardService, loggingService)
+const tableService = new TableService(consistentHashingService, shardService, migrationService, loggingService, metricService);
+
+shardService.on('topology-change', (oldRing, newRing) => {
+	const tableIds = Array.from(tableService.listTables()).map(t => t.id);
+	migrationService.startMigration(oldRing, newRing, tableIds);
+})
 
 export const shardController = new ShardController(shardService);
 export const tableController = new TableController(tableService);

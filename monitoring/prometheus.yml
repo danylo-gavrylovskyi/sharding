@@ -24,9 +24,9 @@ scrape_configs:
                 - 'shard1:8000'
                 - 'shard2:8001'
                 - 'shard3:8002'
-                - 'shard4:8002'
-                - 'shard5:8002'
-                - 'shard6:8002'
+                - 'shard4:8003'
+                - 'shard5:8004'
+                - 'shard6:8005'
       metrics_path: '/internal/metrics'
 
     - job_name: 'cadvisor'

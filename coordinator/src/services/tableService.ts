@@ -5,6 +5,7 @@ import { ConsistentHashRing } from './consistentHashingService';
 import { ShardingKeys } from 'src/types/shardingKeys';
 import { LoggingService } from './logging/loggingService.interface';
 import { MetricsService } from './metricService';
+import { MigrationService } from './migrationService';
 
 export class TableService {
 	private tables: Map<string, ShardingKeys> = new Map();
@@ -12,6 +13,7 @@ export class TableService {
 	constructor(
 		private ring: ConsistentHashRing,
 		private shardService: ShardService,
+		private migrationService: MigrationService,
 		private loggingService: LoggingService,
 		private metricsService: MetricsService
 	) {
@@ -92,57 +94,20 @@ export class TableService {
 			return null;
 		}
 
-		const replicaSet = this.shardService.getReplicaSet(shardId);
-		if (!replicaSet || !replicaSet.readQuorum) {
-			this.loggingService.warn(`No replica set or read quorum found for shard=${shardId} when getting record`);
-			return null;
+		const records = await this.tryReadFromShard(shardId, tableId, partitionKey, sortKey);
+		if (records) return records;
+
+		if (this.migrationService.isMigrating && this.migrationService.oldRing) {
+			const keyHash = `${tableId}::${partitionKey}`;
+			const oldShardId = this.migrationService.oldRing.getServer(keyHash);
+
+			if (oldShardId && oldShardId !== shardId) {
+				this.loggingService.warn(`Key not found on new shard. Trying old shard ${oldShardId} (Migration Fallback)`);
+				await this.tryReadFromShard(oldShardId, tableId, partitionKey, sortKey);
+			}
 		}
 
-		const replicas = this.shardService.getQuorumReplicas(shardId, replicaSet.readQuorum);
-		if (replicas.length === 0) {
-			this.loggingService.warn(`No replicas available for read quorum on shard=${shardId} when getting record`);
-			return null;
-		}
-
-		const responses = await Promise.allSettled(
-			replicas.map(async (address) => {
-				const url = `${address}/internal/tables/${encodeURIComponent(tableId)}/records`;
-				try {
-					const response = await axios.get(url, {
-						params: { partitionKey, sortKey },
-						timeout: 5000,
-					});
-					this.loggingService.info(`Fetched record from shard at ${address} for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey || 'N/A'}`);
-					return {
-						data: response.data,
-						timestamp: response.data._timestamp || Date.now(),
-						success: true,
-					};
-				} catch (error) {
-					this.loggingService.error(`Error fetching record from shard at ${address}: ${error}`);
-					return { success: false };
-				}
-			})
-		);
-
-		const successfulResponses = responses
-			.filter(
-				(r): r is PromiseFulfilledResult<{ data: any; timestamp: number; success: boolean }> =>
-					r.status === 'fulfilled' && r.value.success
-			)
-			.map((r) => r.value);
-
-		if (successfulResponses.length < replicaSet.readQuorum) {
-			this.loggingService.warn(`Insufficient successful responses for read quorum on shard=${shardId}: required=${replicaSet.readQuorum}, received=${successfulResponses.length}`);
-			return null;
-		}
-
-		const newestVersion = successfulResponses.reduce((newest, current) => {
-			return current.timestamp > newest.timestamp ? current : newest;
-		}, successfulResponses[0]);
-		this.loggingService.info(`Returning newest record timestamp=${newestVersion.timestamp} for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey || 'N/A'}`);
-
-		return { data: newestVersion.data };
+		return null;
 	}
 
 	async addRecord(tableId: string, dto: AddRecordDto): Promise<boolean> {
@@ -221,6 +186,60 @@ export class TableService {
 	private getShardId(tableId: string, partitionKey: string): string | null {
 		const keyHash = `${tableId}::${partitionKey}`;
 		return this.ring.getServer(keyHash);
+	}
+
+	private async tryReadFromShard(shardId: string, tableId: string, partitionKey: string, sortKey?: string) {
+		const replicaSet = this.shardService.getReplicaSet(shardId);
+		if (!replicaSet || !replicaSet.readQuorum) {
+			this.loggingService.warn(`No replica set or read quorum found for shard=${shardId} when getting record`);
+			return null;
+		}
+
+		const replicas = this.shardService.getQuorumReplicas(shardId, replicaSet.readQuorum);
+		if (replicas.length === 0) {
+			this.loggingService.warn(`No replicas available for read quorum on shard=${shardId} when getting record`);
+			return null;
+		}
+
+		const responses = await Promise.allSettled(
+			replicas.map(async (address) => {
+				const url = `${address}/internal/tables/${encodeURIComponent(tableId)}/records`;
+				try {
+					const response = await axios.get(url, {
+						params: { partitionKey, sortKey },
+						timeout: 5000,
+					});
+					this.loggingService.info(`Fetched record from shard at ${address} for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey || 'N/A'}`);
+					return {
+						data: response.data,
+						timestamp: response.data._timestamp || Date.now(),
+						success: true,
+					};
+				} catch (error) {
+					this.loggingService.error(`Error fetching record from shard at ${address}: ${error}`);
+					return { success: false };
+				}
+			})
+		);
+
+		const successfulResponses = responses
+			.filter(
+				(r): r is PromiseFulfilledResult<{ data: any; timestamp: number; success: boolean }> =>
+					r.status === 'fulfilled' && r.value.success
+			)
+			.map((r) => r.value);
+
+		if (successfulResponses.length < replicaSet.readQuorum) {
+			this.loggingService.warn(`Insufficient successful responses for read quorum on shard=${shardId}: required=${replicaSet.readQuorum}, received=${successfulResponses.length}`);
+			return null;
+		}
+
+		const newestVersion = successfulResponses.reduce((newest, current) => {
+			return current.timestamp > newest.timestamp ? current : newest;
+		}, successfulResponses[0]);
+		this.loggingService.info(`Returning newest record timestamp=${newestVersion.timestamp} for table=${tableId}, partitionKey=${partitionKey}, sortKey=${sortKey || 'N/A'}`);
+
+		return { data: newestVersion.data };
 	}
 
 	private startMetricsCollection(): void {

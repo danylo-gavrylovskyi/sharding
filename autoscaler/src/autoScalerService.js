@@ -5,7 +5,7 @@ const PROMETHEUS_URL = process.env.PROMETHEUS_URL || 'http://prometheus:9090';
 const SCALING_GROUP = (process.env.SCALING_GROUP || 'shard4,shard5,shard6').split(',');
 
 const LATENCY_THRESHOLD = 200; // ms
-const CPU_THRESHOLD = 70; // %
+const CPU_THRESHOLD = 15; // %
 const SCALE_DOWN_MINUTES = 1;
 
 const docker = new Docker({socketPath: '/var/run/docker.sock'});

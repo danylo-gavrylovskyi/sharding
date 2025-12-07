@@ -35,14 +35,18 @@ export class ReplicationConsumerService {
 
 			this.loggingService.info(`Applying replication: ${message.operation} table=${message.tableId} pk=${message.partitionKey} logIndex=${message.logIndex}`);
 
+			const record = {
+				partitionKey: message.partitionKey,
+				sortKey: message.sortKey,
+				...message.record
+			}
+
 			try {
 				switch (message.operation) {
 					case ReplicationOperation.CREATE:
 						await this.recordService.addRecord(
 							message.tableId,
-							message.partitionKey,
-							message.record!,
-							message.sortKey
+							record
 						);
 						break;
 					case ReplicationOperation.DELETE:

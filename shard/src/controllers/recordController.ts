@@ -1,10 +1,15 @@
 import { Request, Response } from 'express';
-import { AddRecordDto } from 'src/dtos/addRecordDto';
 import { RecordService } from 'src/services/recordService';
 import { ShardingKeys } from 'src/types/shardingKeys.type';
 
 export class RecordController {
-	constructor(private recordService: RecordService) {}
+	constructor(private recordService: RecordService) { }
+
+	getTablePartitionKeys(req: Request, res: Response) {
+		const tableId = req.params.tableId;
+		const partitionKeys = this.recordService.getTablePartitionKeys(tableId);
+		return res.status(200).json({ partitionKeys });
+	}
 
 	existsRecord(req: Request, res: Response) {
 		const tableId = req.params.tableId;
@@ -39,13 +44,13 @@ export class RecordController {
 
 	async addRecord(req: Request, res: Response) {
 		const tableId = req.params.tableId;
-		const { partitionKey, sortKey, record }: AddRecordDto = req.body;
+		const dto = req.body;
 
-		if (!partitionKey || !record) {
-			return res.status(400).json({ error: 'partitionKey and record are required' });
+		if (!dto.partitionKey) {
+			return res.status(400).json({ error: 'partitionKey is required' });
 		}
 
-		if (!(await this.recordService.addRecord(tableId, partitionKey, record, sortKey))) {
+		if (!(await this.recordService.addRecord(tableId, dto))) {
 			return res.status(500).json({ error: 'Failed to add record' });
 		}
 

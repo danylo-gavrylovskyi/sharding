@@ -5,8 +5,13 @@ import { ConsistentHashRing } from './consistentHashingService';
 import { ReplicaSet } from 'src/types/replicaSet';
 import { LoggingService } from './logging/loggingService.interface';
 import { MetricsService } from './metricService';
+import EventEmitter from 'events';
 
-export class ShardService {
+export declare interface ShardService {
+	on(event: 'topology-change', listener: (oldRing: ConsistentHashRing, newRing: ConsistentHashRing) => void): this;
+}
+
+export class ShardService extends EventEmitter {
 	private shards: Map<string, ShardMetadata> = new Map();
 	private replicaSets: Map<string, ReplicaSet> = new Map();
 
@@ -18,6 +23,7 @@ export class ShardService {
 		private loggingService: LoggingService,
 		private metricsService: MetricsService
 	) {
+		super();
 		this.startHealthChecks();
 		this.startMetricsCollection();
 	}
@@ -110,8 +116,13 @@ export class ShardService {
 		);
 
 		if (!existingShardWithId) {
+			const oldRing = this.ring.clone();
+
 			this.ring.addServer(shard.shardId);
 			this.loggingService.info(`Shard ${shard.shardId} added to hash ring.`);
+
+			this.loggingService.info('Triggering migration...');
+			this.emit('topology-change', oldRing, this.ring);
 		} else {
 			this.loggingService.info(`Shard ${shard.shardId} already in hash ring, skipping.`);
 		}

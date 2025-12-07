@@ -52,6 +52,14 @@ export class ConsistentHashRing {
         return Array.from(this.servers);
     }
 
+    clone(): ConsistentHashRing {
+        const copy = new ConsistentHashRing(this.replicasCount);
+        copy.servers = new Set(this.servers);
+        copy.ring = new Map(this.ring);
+        copy.sortedKeys = [...this.sortedKeys];
+        return copy;
+    }
+
     private binarySearch(array: string[], value: string): number {
         let low = 0;
         let high = array.length;
