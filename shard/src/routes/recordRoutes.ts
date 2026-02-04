@@ -4,6 +4,7 @@ import { RecordController } from '../controllers/recordController';
 export const createRecordRoutes = (recordController: RecordController) => {
 	const router = Router();
 
+	router.get('/tables/:tableId/partitions', (req, res) => recordController.getTablePartitionKeys(req, res));
 	router.head('/tables/:tableId/records', (req, res) => recordController.existsRecord(req, res));
 	router.get('/tables/:tableId/records', (req, res) => recordController.getRecord(req, res));
 	router.post(

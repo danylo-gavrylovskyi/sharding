@@ -1,0 +1,183 @@
+groups:
+    - name: distributed_database_alerts
+      interval: 30s
+      rules:
+          - alert: NodeDown
+            expr: up{job=~"coordinator|shards"} == 0
+            for: 1m
+            labels:
+                severity: critical
+                component: infrastructure
+            annotations:
+                summary: 'Node {{ $labels.instance }} is down'
+                description: '{{ $labels.job }} instance {{ $labels.instance }} has been down for more than 1 minute.'
+
+          - alert: AllShardsDown
+            expr: coordinator_healthy_shards == 0 and coordinator_total_shards > 0
+            for: 30s
+            labels:
+                severity: critical
+                component: cluster
+            annotations:
+                summary: 'All shards are down'
+                description: 'No healthy shards available. Total shards: {{ $value }}. This will cause service outage.'
+
+          - alert: NoLeaderAvailable
+            expr: coordinator_leaders_total == 0 and coordinator_total_shards > 0
+            for: 1m
+            labels:
+                severity: critical
+                component: cluster
+            annotations:
+                summary: 'No leader shard available'
+                description: 'The cluster has no leader shard. Write operations will fail.'
+
+          - alert: HighReplicationLag
+            expr: shard_replication_lag_seconds > 5
+            for: 2m
+            labels:
+                severity: critical
+                component: replication
+            annotations:
+                summary: 'High replication lag on {{ $labels.instance }}'
+                description: 'Replication lag is {{ $value }} seconds on {{ $labels.instance }}, exceeding the 5 second threshold for 2 minutes.'
+
+          - alert: HighRequestLatencyP99
+            expr: histogram_quantile(0.99, rate(coordinator_request_latency_bucket[5m])) > 1
+            for: 5m
+            labels:
+                severity: critical
+                component: performance
+            annotations:
+                summary: 'High P99 latency on coordinator'
+                description: 'Coordinator P99 request latency is {{ $value }}s for route {{ $labels.route }}, exceeding 1 second threshold.'
+
+          - alert: HighShardLatencyP99
+            expr: histogram_quantile(0.99, rate(shard_request_latency_bucket[5m])) > 1
+            for: 5m
+            labels:
+                severity: critical
+                component: performance
+            annotations:
+                summary: 'High P99 latency on {{ $labels.instance }}'
+                description: 'Shard {{ $labels.instance }} P99 request latency is {{ $value }}s for route {{ $labels.route }}, exceeding 1 second threshold.'
+
+          - alert: HighErrorRate
+            expr: (rate(coordinator_errors_total[5m]) / rate(coordinator_requests_total[5m])) > 0.05
+            for: 3m
+            labels:
+                severity: critical
+                component: reliability
+            annotations:
+                summary: 'High error rate on coordinator'
+                description: 'Error rate is {{ $value | humanizePercentage }} on coordinator route {{ $labels.route }}, exceeding 5% threshold.'
+
+          - alert: HighShardErrorRate
+            expr: (rate(shard_errors_total[5m]) / rate(shard_requests_total[5m])) > 0.05
+            for: 3m
+            labels:
+                severity: critical
+                component: reliability
+            annotations:
+                summary: 'High error rate on {{ $labels.instance }}'
+                description: 'Error rate is {{ $value | humanizePercentage }} on {{ $labels.instance }} route {{ $labels.route }}, exceeding 5% threshold.'
+
+          - alert: ReplicationStopped
+            expr: rate(shard_replication_messages_processed_total[5m]) == 0 and shard_replication_messages_published_total > 0
+            for: 5m
+            labels:
+                severity: critical
+                component: replication
+            annotations:
+                summary: 'Replication stopped on {{ $labels.instance }}'
+                description: 'No replication messages have been processed on {{ $labels.instance }} for 5 minutes, but messages are being published.'
+
+          - alert: UnhealthyShards
+            expr: coordinator_unhealthy_shards > 0
+            for: 2m
+            labels:
+                severity: warning
+                component: cluster
+            annotations:
+                summary: '{{ $value }} unhealthy shard(s) detected'
+                description: 'There are {{ $value }} unhealthy shards. This may impact availability.'
+
+          - alert: HighReplicationLagWarning
+            expr: shard_replication_lag_seconds > 1 and shard_replication_lag_seconds <= 5
+            for: 5m
+            labels:
+                severity: warning
+                component: replication
+            annotations:
+                summary: 'Elevated replication lag on {{ $labels.instance }}'
+                description: 'Replication lag is {{ $value }} seconds on {{ $labels.instance }}, exceeding 1 second.'
+
+          - alert: ImbalancedShardDistribution
+            expr: stddev(coordinator_shard_key_distribution) > 50
+            for: 10m
+            labels:
+                severity: warning
+                component: distribution
+            annotations:
+                summary: 'Imbalanced shard key distribution'
+                description: 'Shard key distribution has high standard deviation ({{ $value }}), indicating potential hotspots.'
+
+          - alert: HighRequestLatencyP95
+            expr: histogram_quantile(0.95, rate(coordinator_request_latency_bucket[5m])) > 0.5
+            for: 10m
+            labels:
+                severity: warning
+                component: performance
+            annotations:
+                summary: 'Elevated P95 latency on coordinator'
+                description: 'Coordinator P95 request latency is {{ $value }}s for route {{ $labels.route }}, exceeding 500ms threshold.'
+
+          - alert: HighShardLatencyP95
+            expr: histogram_quantile(0.95, rate(shard_request_latency_bucket[5m])) > 0.5
+            for: 10m
+            labels:
+                severity: warning
+                component: performance
+            annotations:
+                summary: 'Elevated P95 latency on {{ $labels.instance }}'
+                description: 'Shard {{ $labels.instance }} P95 request latency is {{ $value }}s for route {{ $labels.route }}, exceeding 500ms threshold.'
+
+          - alert: LowBloomFilterHitRate
+            expr: rate(shard_bloom_filter_hits_total[5m]) / (rate(shard_bloom_filter_hits_total[5m]) + rate(shard_bloom_filter_misses_total[5m])) < 0.7
+            for: 10m
+            labels:
+                severity: warning
+                component: performance
+            annotations:
+                summary: 'Low bloom filter hit rate on {{ $labels.instance }}'
+                description: 'Bloom filter hit rate is {{ $value | humanizePercentage }} for table {{ $labels.table_id }} on {{ $labels.instance }}, below 70% threshold.'
+
+          - alert: ReplicationErrors
+            expr: rate(shard_replication_errors_total[5m]) > 0.1
+            for: 5m
+            labels:
+                severity: warning
+                component: replication
+            annotations:
+                summary: 'Replication errors on {{ $labels.instance }}'
+                description: 'Replication error rate is {{ $value }} errors/sec for operation {{ $labels.operation }} on {{ $labels.instance }}.'
+
+          - alert: HighMemoryUsage
+            expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.85
+            for: 5m
+            labels:
+                severity: warning
+                component: resources
+            annotations:
+                summary: 'High memory usage on {{ $labels.instance }}'
+                description: 'Memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}, exceeding 85% threshold.'
+
+          - alert: HighCPUUsage
+            expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+            for: 10m
+            labels:
+                severity: warning
+                component: resources
+            annotations:
+                summary: 'High CPU usage on {{ $labels.instance }}'
+                description: 'CPU usage is {{ $value }}% on {{ $labels.instance }}, exceeding 80% threshold.'

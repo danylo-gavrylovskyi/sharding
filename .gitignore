@@ -1,0 +1,3 @@
+node_modules
+dist
+monitoring/grafana/plugins/*

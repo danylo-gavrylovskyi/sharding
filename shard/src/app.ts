@@ -1,7 +1,11 @@
 import express from 'express';
-// import swaggerUi from 'swagger-ui-express';
-// import YAML from 'yamljs';
-// import path from 'path';
+import swaggerUi from 'swagger-ui-express';
+import YAML from 'yamljs';
+import path from 'path';
+
+import { OpenTelemetryTracingService } from './services/tracing/openTelemetryTracingService';
+new OpenTelemetryTracingService();
+
 import { BloomFilterService } from './services/bloomFilter/bloomFilterService';
 import { RecordService } from './services/recordService';
 import { RecordController } from './controllers/recordController';
@@ -13,6 +17,9 @@ import { ReplicationProducerService } from './services/replication/replicationPr
 import { ReplicationConsumerService } from './services/replication/replicationConsumerService';
 import { FileOffsetStoreService } from './services/offsetStore/fileOffsetStoreService';
 import { retry } from './utils/retry';
+import { MetricsService } from './services/metricService';
+import { createMetricMiddleware } from './middlewares/metricMiddleware';
+import { PinoLoggingService } from './services/logging/pinoLoggingService';
 
 const app = express();
 app.use(express.json());
@@ -25,14 +32,16 @@ const ROLE: ShardRole = (process.env.ROLE as ShardRole) || ShardRole.FOLLOWER;
 const RABBITMQ_URL: string = process.env.RABBITMQ_URL || 'amqp://localhost';
 const EXCHANGE_NAME: string = process.env.EXCHANGE_NAME || 'replication';
 
+const metricService = new MetricsService('shard');
+const loggingService = new PinoLoggingService();
 const registrationService = new ShardRegistrationService(COORDINATOR_URL, {
 	shardId: SHARD_ID,
 	address: ADDRESS,
 	role: ROLE,
-});
-const bloomFilterService = new BloomFilterService();
-const offsetStoreService = new FileOffsetStoreService();
-const rabbitMQService = new RabbitMQService(RABBITMQ_URL, EXCHANGE_NAME);
+}, loggingService);
+const bloomFilterService = new BloomFilterService(loggingService, metricService);
+const offsetStoreService = new FileOffsetStoreService(loggingService);
+const rabbitMQService = new RabbitMQService(RABBITMQ_URL, EXCHANGE_NAME, loggingService);
 
 async function bootstrap() {
 	await registrationService.register();
@@ -43,24 +52,26 @@ async function bootstrap() {
 	let recordService: RecordService;
 
 	if (ROLE === ShardRole.LEADER) {
-		const replicationProducerService = new ReplicationProducerService(rabbitMQService);
-		recordService = new RecordService(bloomFilterService, ROLE, replicationProducerService);
+		const replicationProducerService = new ReplicationProducerService(rabbitMQService, loggingService, metricService);
+		recordService = new RecordService(bloomFilterService, ROLE, loggingService, metricService, replicationProducerService);
 	} else {
-		recordService = new RecordService(bloomFilterService, ROLE);
+		recordService = new RecordService(bloomFilterService, ROLE, loggingService, metricService);
 		const replicationConsumerService = new ReplicationConsumerService(
 			rabbitMQService,
 			recordService,
-			offsetStoreService
+			offsetStoreService,
+			loggingService,
+			metricService
 		);
 		await replicationConsumerService.start();
 	}
 
 	const recordController = new RecordController(recordService);
 
-	// const swaggerDocument = YAML.load(path.join(__dirname, '../docs/openapi.yaml'));
-	// app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
-
-	app.use(createRoutes(recordController));
+	const swaggerDocument = YAML.load(path.join(__dirname, '../docs/openapi.yaml'));
+	app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+	app.use(createMetricMiddleware(metricService));
+	app.use(createRoutes(recordController, metricService));
 
 	app.listen(PORT, () => {
 		console.log(`Shard service running on port ${PORT}`);

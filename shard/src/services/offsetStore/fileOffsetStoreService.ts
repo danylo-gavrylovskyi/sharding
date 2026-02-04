@@ -1,8 +1,12 @@
 import fs from 'fs';
 import { OffsetStoreService } from './offsetStoreService.interface';
+import { LoggingService } from '../logging/loggingService.interface';
 
 export class FileOffsetStoreService implements OffsetStoreService {
-	constructor(private filePath = './data/offset.txt') {}
+	constructor(
+		private loggingService: LoggingService,
+		private filePath = './data/offset.txt'
+	) { }
 
 	load(): number {
 		try {
@@ -10,7 +14,7 @@ export class FileOffsetStoreService implements OffsetStoreService {
 				return Number(fs.readFileSync(this.filePath, 'utf8'));
 			}
 		} catch (error) {
-			console.warn('Failed to read offset file:', error);
+			this.loggingService.warn('Failed to read offset from file:', error);
 		}
 
 		return -1;
@@ -20,7 +24,7 @@ export class FileOffsetStoreService implements OffsetStoreService {
 		try {
 			fs.writeFileSync(this.filePath, offset.toString(), 'utf-8');
 		} catch (error) {
-			console.warn('Failed to write offset to file:', error);
+			this.loggingService.error('Failed to write offset to file:', error);
 		}
 	}
 }
